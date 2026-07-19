@@ -1,1 +1,549 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Strava Personal</title>
+<style>
+  :root{
+    --bg:#f4f5f2; --panel:#ffffff; --text:#1d2420; --muted:#5c6b62;
+    --border:#dde2dc; --accent:#2f5d50; --accent-2:#a5620b; --safe:#2f7d4f;
+    --danger:#a6392f; --gold:#b8860b;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#141815; --panel:#1d2420; --text:#e8ece8; --muted:#93a397;
+      --border:#2c352f; --accent:#6fb79b; --accent-2:#d99a4e; --safe:#5fbf85;
+      --danger:#e07468; --gold:#e0b84e;
+    }
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg); color:var(--text); padding:16px;
+  }
+  h1{font-size:20px; margin:0 0 2px;}
+  .subtitle{color:var(--muted); font-size:13px; margin:0 0 16px;}
+  .panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:14px 16px; margin-bottom:14px;
+  }
+  .panel h2{font-size:14px; margin:0 0 10px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;}
+  .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+  .field-label{font-size:12px; color:var(--muted); margin-bottom:4px; display:block;}
+  .field-input{
+    width:100%; padding:8px 9px; border:1px solid var(--border); border-radius:6px;
+    background:var(--bg); color:var(--text); font-size:13px;
+  }
+  .field-group{flex:1; min-width:160px;}
+  button{
+    font:inherit; cursor:pointer; border-radius:6px; border:1px solid var(--border);
+    background:var(--panel); color:var(--text); padding:8px 12px; font-size:13px;
+  }
+  button.primary{background:var(--accent); color:#fff; border-color:var(--accent);}
+  button.danger-text{color:var(--danger); border-color:var(--danger);}
+  button:disabled{opacity:.5; cursor:default;}
+  .status-pill{
+    font-size:12px; padding:5px 9px; border-radius:20px; display:inline-block;
+  }
+  .status-pill.connected{background:#eaf5ee; color:var(--safe);}
+  .status-pill.disconnected{background:#f4f0e6; color:var(--accent-2);}
+  @media (prefers-color-scheme: dark){
+    .status-pill.connected{background:#183226;}
+    .status-pill.disconnected{background:#2e2513;}
+  }
+  #syncStatus{font-size:12px; color:var(--muted); margin-top:8px; min-height:16px;}
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th, td{text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); white-space:nowrap;}
+  th{
+    cursor:pointer; user-select:none; color:var(--muted); font-weight:600;
+    font-size:11px; text-transform:uppercase; letter-spacing:.03em;
+  }
+  th:hover{color:var(--text);}
+  th .arrow{font-size:10px; margin-left:3px;}
+  td.num{text-align:right; font-variant-numeric:tabular-nums;}
+  td.seg-name a{color:var(--text); text-decoration:none; border-bottom:1px solid var(--border);}
+  td.seg-name a:hover{border-color:var(--text);}
+  .laurel{margin-right:4px;}
+  .legend-name{color:var(--muted);}
+  .table-wrap{overflow-x:auto;}
+  .empty-msg{color:var(--muted); font-size:13px; padding:8px 0;}
+  .filters{margin-bottom:10px;}
+  .filters label{font-size:12px; margin-right:14px; color:var(--muted);}
+  .filters input[type=checkbox]{vertical-align:middle; margin-right:4px;}
+  .small-note{font-size:11px; color:var(--muted); margin-top:6px;}
+</style>
+</head>
+<body>
 
+  <h1>Strava Personal</h1>
+  <p class="subtitle">Local Legend tracker — segments run in the last <span id="lookbackDaysLabel">90</span> days</p>
+
+  <div class="panel" id="connectPanel">
+    <h2>Strava Connection</h2>
+    <div id="stravaStatus" class="status-pill disconnected">Not connected</div>
+    <div id="stravaFields" style="margin-top:10px;">
+      <div class="row">
+        <div class="field-group">
+          <span class="field-label">Client ID</span>
+          <input class="field-input" id="stravaClientId" type="text" placeholder="from strava.com/settings/api" />
+        </div>
+        <div class="field-group">
+          <span class="field-label">Client Secret</span>
+          <input class="field-input" id="stravaClientSecret" type="password" placeholder="from strava.com/settings/api" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <div class="field-group">
+          <span class="field-label">Token relay URL</span>
+          <input class="field-input" id="stravaProxy" type="text" placeholder="https://your-worker.workers.dev" />
+        </div>
+      </div>
+      <p class="small-note">
+        The relay just forwards the OAuth token exchange to Strava (a plain static page can't do this itself
+        because Strava's token endpoint doesn't allow direct browser requests). You can reuse the same relay
+        and the same Client ID/Secret you already use for RouteGuard — Strava's callback check only cares about
+        the domain, not the path.
+      </p>
+      <button class="primary" id="btnStravaConnect" style="margin-top:8px;">Connect to Strava</button>
+      <button class="danger-text" id="btnStravaDisconnect" style="margin-top:8px; display:none;">Disconnect</button>
+    </div>
+  </div>
+
+  <div class="panel" id="syncPanel" style="display:none;">
+    <h2>Sync</h2>
+    <div class="row">
+      <button class="primary" id="btnSync">Sync last 90 days</button>
+      <button id="btnClearCache">Clear cached data</button>
+    </div>
+    <div id="syncStatus"></div>
+  </div>
+
+  <div class="panel" id="tablePanel" style="display:none;">
+    <h2>Segments</h2>
+    <div class="filters" id="typeFilters"></div>
+    <div class="table-wrap">
+      <table id="segTable">
+        <thead>
+          <tr>
+            <th data-key="name">Segment</th>
+            <th data-key="myCount">My Efforts</th>
+            <th data-key="legendName">Local Legend</th>
+            <th data-key="legendCount">Their Efforts</th>
+            <th data-key="runsAway">Runs to Beat</th>
+          </tr>
+        </thead>
+        <tbody id="segTableBody"></tbody>
+      </table>
+      <div class="empty-msg" id="emptyMsg" style="display:none;">No segments found in this window yet — run Sync.</div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  "use strict";
+
+  const LOOKBACK_DAYS = 90;
+  document.getElementById('lookbackDaysLabel').textContent = LOOKBACK_DAYS;
+
+  // ---------- storage ----------
+  const LS_CFG = "sp_strava_cfg";           // {clientId, clientSecret, proxy}
+  const LS_TOK = "sp_strava_tok";           // {access_token, refresh_token, expires_at}
+  const LS_ATHLETE = "sp_athlete";          // {id, firstname, lastname}
+  const LS_ACTIVITIES = "sp_activities";    // {id: summaryActivity}
+  const LS_ACTIVITY_DETAIL = "sp_activity_detail"; // {id: [{segmentId, segmentName, startDate}]}
+  const LS_SEGMENT_INFO = "sp_segment_info"; // {id: {name, legend:{athleteId,title,effortCount}|null, fetchedAt}}
+  const LS_LAST_SYNC = "sp_last_sync";
+  const LS_TYPE_FILTER = "sp_type_filter";  // array of sport_type strings to include
+
+  const SEGMENT_INFO_TTL_MS = 6 * 60 * 60 * 1000; // 6h — legend status can change as others run
+
+  function loadJSON(key, fallback){ try{ const v = JSON.parse(localStorage.getItem(key)); return v==null?fallback:v; }catch(e){ return fallback; } }
+  function saveJSON(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
+
+  function loadCfg(){ return loadJSON(LS_CFG, {}); }
+  function saveCfg(c){ saveJSON(LS_CFG, c); }
+  function loadTok(){ return loadJSON(LS_TOK, null); }
+  function saveTok(t){ saveJSON(LS_TOK, t); }
+  function clearTok(){ localStorage.removeItem(LS_TOK); }
+
+  // ---------- DOM refs ----------
+  const stravaClientId = document.getElementById('stravaClientId');
+  const stravaClientSecret = document.getElementById('stravaClientSecret');
+  const stravaProxy = document.getElementById('stravaProxy');
+  const stravaStatusEl = document.getElementById('stravaStatus');
+  const btnStravaConnect = document.getElementById('btnStravaConnect');
+  const btnStravaDisconnect = document.getElementById('btnStravaDisconnect');
+  const syncPanel = document.getElementById('syncPanel');
+  const tablePanel = document.getElementById('tablePanel');
+  const btnSync = document.getElementById('btnSync');
+  const btnClearCache = document.getElementById('btnClearCache');
+  const syncStatusEl = document.getElementById('syncStatus');
+  const typeFiltersEl = document.getElementById('typeFilters');
+  const segTableBody = document.getElementById('segTableBody');
+  const emptyMsg = document.getElementById('emptyMsg');
+
+  function setSyncStatus(msg){ syncStatusEl.textContent = msg || ''; }
+
+  // ---------- OAuth ----------
+  (function initFields(){
+    const cfg = loadCfg();
+    stravaClientId.value = cfg.clientId || '';
+    stravaClientSecret.value = cfg.clientSecret || '';
+    stravaProxy.value = cfg.proxy || '';
+    refreshStatusUI();
+  })();
+
+  function refreshStatusUI(){
+    const tok = loadTok();
+    const connected = !!tok;
+    stravaStatusEl.textContent = connected ? 'Connected to Strava' : 'Not connected';
+    stravaStatusEl.className = 'status-pill ' + (connected ? 'connected' : 'disconnected');
+    btnStravaConnect.style.display = connected ? 'none' : 'block';
+    btnStravaDisconnect.style.display = connected ? 'block' : 'none';
+    syncPanel.style.display = connected ? 'block' : 'none';
+    tablePanel.style.display = connected ? 'block' : 'none';
+    if(connected) renderTable();
+  }
+
+  btnStravaConnect.onclick = () => {
+    const cfg = {
+      clientId: stravaClientId.value.trim(),
+      clientSecret: stravaClientSecret.value.trim(),
+      proxy: stravaProxy.value.trim().replace(/\/$/, '')
+    };
+    if(!cfg.clientId || !cfg.clientSecret || !cfg.proxy){
+      setSyncStatus('Fill in Client ID, Client Secret, and your token relay URL first.');
+      return;
+    }
+    saveCfg(cfg);
+    const redirectUri = window.location.origin + window.location.pathname;
+    const authUrl = `https://www.strava.com/oauth/authorize?client_id=${encodeURIComponent(cfg.clientId)}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&approval_prompt=auto` +
+      `&scope=${encodeURIComponent('read,activity:read_all')}`;
+    window.location.href = authUrl;
+  };
+
+  btnStravaDisconnect.onclick = () => {
+    clearTok();
+    refreshStatusUI();
+    setSyncStatus('Disconnected.');
+  };
+
+  async function exchangeCode(code){
+    const cfg = loadCfg();
+    if(!cfg.proxy){ setSyncStatus('Missing token relay URL — cannot complete login.'); return; }
+    try{
+      const res = await fetch(cfg.proxy + '/token', {
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({ client_id: cfg.clientId, client_secret: cfg.clientSecret, code, grant_type:'authorization_code' })
+      });
+      const data = await res.json();
+      if(!res.ok || !data.access_token) throw new Error(data.message || 'token exchange failed');
+      saveTok({ access_token: data.access_token, refresh_token: data.refresh_token, expires_at: data.expires_at });
+      if(data.athlete) saveJSON(LS_ATHLETE, { id: data.athlete.id, firstname: data.athlete.firstname, lastname: data.athlete.lastname });
+      refreshStatusUI();
+      setSyncStatus('Connected. Click "Sync last 90 days" to load your segments.');
+    }catch(err){
+      setSyncStatus('Login failed: ' + err.message);
+    }
+  }
+
+  async function ensureToken(){
+    const tok = loadTok();
+    if(!tok) return null;
+    if(tok.expires_at && tok.expires_at > (Date.now()/1000 + 60)) return tok.access_token;
+    const cfg = loadCfg();
+    try{
+      const res = await fetch(cfg.proxy + '/token', {
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({ client_id: cfg.clientId, client_secret: cfg.clientSecret, refresh_token: tok.refresh_token, grant_type:'refresh_token' })
+      });
+      const data = await res.json();
+      if(!res.ok || !data.access_token) throw new Error('refresh failed');
+      saveTok({ access_token: data.access_token, refresh_token: data.refresh_token, expires_at: data.expires_at });
+      return data.access_token;
+    }catch(err){
+      setSyncStatus('Session expired — please reconnect.');
+      clearTok(); refreshStatusUI();
+      return null;
+    }
+  }
+
+  (function handleRedirect(){
+    try{
+      const params = new URLSearchParams(window.location.search);
+      if(params.get('code')){
+        const code = params.get('code');
+        window.history.replaceState({}, document.title, window.location.pathname);
+        exchangeCode(code);
+      } else if(params.get('error')){
+        setSyncStatus('Strava login was cancelled or denied.');
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }catch(err){
+      console.error('redirect handling failed (non-fatal):', err);
+    }
+  })();
+
+  // ---------- rate-limit-aware API helper ----------
+  async function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+  async function apiGet(path, params){
+    const accessToken = await ensureToken();
+    if(!accessToken) throw new Error('not connected');
+    const url = new URL('https://www.strava.com/api/v3' + path);
+    if(params) Object.entries(params).forEach(([k,v]) => { if(v!=null) url.searchParams.set(k, v); });
+    for(let attempt=0; attempt<4; attempt++){
+      const res = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
+      if(res.status === 429){
+        const retryAfter = parseInt(res.headers.get('Retry-After') || '30', 10);
+        setSyncStatus(`Rate limited by Strava — waiting ${retryAfter}s...`);
+        await sleep(retryAfter * 1000);
+        continue;
+      }
+      if(!res.ok) throw new Error(`Strava API ${path} failed (${res.status})`);
+      return res.json();
+    }
+    throw new Error(`Strava API ${path} kept rate-limiting — try again later`);
+  }
+
+  // ---------- sync ----------
+  btnClearCache.onclick = () => {
+    [LS_ACTIVITIES, LS_ACTIVITY_DETAIL, LS_SEGMENT_INFO, LS_LAST_SYNC].forEach(k => localStorage.removeItem(k));
+    setSyncStatus('Cache cleared.');
+    renderTable();
+  };
+
+  btnSync.onclick = () => runSync().catch(err => setSyncStatus('Sync failed: ' + err.message));
+
+  async function runSync(){
+    btnSync.disabled = true;
+    try{
+      const afterEpoch = Math.floor((Date.now() - LOOKBACK_DAYS*24*60*60*1000) / 1000);
+      const activities = loadJSON(LS_ACTIVITIES, {});
+
+      // 1. fetch summary activities in the window, paginated
+      setSyncStatus('Fetching activity list...');
+      let page = 1, keepGoing = true;
+      while(keepGoing && page <= 10){
+        const batch = await apiGet('/athlete/activities', { after: afterEpoch, per_page: 100, page });
+        if(!batch.length){ keepGoing = false; break; }
+        batch.forEach(a => {
+          activities[a.id] = {
+            id: a.id, name: a.name, type: a.type, sport_type: a.sport_type || a.type,
+            start_date: a.start_date
+          };
+        });
+        if(batch.length < 100) keepGoing = false;
+        page++;
+      }
+
+      // drop cached activities that fell out of the 90-day window
+      Object.keys(activities).forEach(id => {
+        if(new Date(activities[id].start_date).getTime() < afterEpoch*1000) delete activities[id];
+      });
+      saveJSON(LS_ACTIVITIES, activities);
+
+      // 2. build/update the type filter UI from what we've seen
+      renderTypeFilters(activities);
+      const includeTypes = loadJSON(LS_TYPE_FILTER, null);
+      const allIds = Object.keys(activities).filter(id => {
+        const t = activities[id].sport_type;
+        return !includeTypes || includeTypes.includes(t);
+      });
+
+      // 3. fetch activity detail (segment_efforts) for any activity not yet cached
+      const detailCache = loadJSON(LS_ACTIVITY_DETAIL, {});
+      const missing = allIds.filter(id => !detailCache[id]);
+      for(let i=0; i<missing.length; i++){
+        const id = missing[i];
+        setSyncStatus(`Fetching activity detail ${i+1}/${missing.length}...`);
+        const detail = await apiGet(`/activities/${id}`);
+        detailCache[id] = (detail.segment_efforts || []).map(e => ({
+          segmentId: e.segment.id,
+          segmentName: e.segment.name,
+          startDate: e.start_date
+        }));
+        saveJSON(LS_ACTIVITY_DETAIL, detailCache);
+        await sleep(120);
+      }
+
+      // 4. aggregate my effort counts per segment within the window
+      const myCounts = {}; // segmentId -> {count, name}
+      allIds.forEach(id => {
+        const efforts = detailCache[id] || [];
+        efforts.forEach(e => {
+          if(new Date(e.startDate).getTime() < afterEpoch*1000) return;
+          if(!myCounts[e.segmentId]) myCounts[e.segmentId] = { count: 0, name: e.segmentName };
+          myCounts[e.segmentId].count++;
+        });
+      });
+
+      // 5. fetch/refresh segment info (local legend) for each segment encountered
+      const segInfo = loadJSON(LS_SEGMENT_INFO, {});
+      const segIds = Object.keys(myCounts);
+      const now = Date.now();
+      const staleIds = segIds.filter(id => !segInfo[id] || (now - segInfo[id].fetchedAt) > SEGMENT_INFO_TTL_MS);
+      for(let i=0; i<staleIds.length; i++){
+        const id = staleIds[i];
+        setSyncStatus(`Fetching segment info ${i+1}/${staleIds.length}...`);
+        try{
+          const detail = await apiGet(`/segments/${id}`);
+          segInfo[id] = {
+            name: detail.name || myCounts[id].name,
+            legend: detail.local_legend ? {
+              athleteId: detail.local_legend.athlete_id,
+              title: detail.local_legend.title,
+              effortCount: detail.local_legend.effort_count
+            } : null,
+            fetchedAt: now
+          };
+        }catch(err){
+          console.error('segment fetch failed for', id, err);
+          segInfo[id] = segInfo[id] || { name: myCounts[id].name, legend: null, fetchedAt: now, error: true };
+        }
+        saveJSON(LS_SEGMENT_INFO, segInfo);
+        await sleep(120);
+      }
+
+      saveJSON(LS_LAST_SYNC, now);
+      setSyncStatus('Synced ' + new Date(now).toLocaleString() + '.');
+      renderTable();
+    } finally {
+      btnSync.disabled = false;
+    }
+  }
+
+  // ---------- type filters ----------
+  function renderTypeFilters(activities){
+    const seen = Array.from(new Set(Object.values(activities).map(a => a.sport_type))).sort();
+    if(!seen.length) return;
+    let selected = loadJSON(LS_TYPE_FILTER, null);
+    if(!selected){
+      // default: run-like types only
+      selected = seen.filter(t => /run/i.test(t));
+      if(!selected.length) selected = seen.slice();
+      saveJSON(LS_TYPE_FILTER, selected);
+    }
+    typeFiltersEl.innerHTML = '';
+    seen.forEach(t => {
+      const id = 'tf_' + t;
+      const label = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.id = id; cb.checked = selected.includes(t);
+      cb.onchange = () => {
+        const cur = loadJSON(LS_TYPE_FILTER, []);
+        const next = cb.checked ? Array.from(new Set([...cur, t])) : cur.filter(x => x !== t);
+        saveJSON(LS_TYPE_FILTER, next);
+        renderTable();
+      };
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(t));
+      typeFiltersEl.appendChild(label);
+    });
+  }
+
+  // ---------- table render ----------
+  let myAthleteId = (loadJSON(LS_ATHLETE, {}) || {}).id;
+  let sortKey = 'runsAway', sortDir = 1;
+
+  document.querySelectorAll('#segTable th').forEach(th => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.key;
+      if(sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = 1; }
+      renderTable();
+    });
+  });
+
+  function buildRows(){
+    const activities = loadJSON(LS_ACTIVITIES, {});
+    const detailCache = loadJSON(LS_ACTIVITY_DETAIL, {});
+    const segInfo = loadJSON(LS_SEGMENT_INFO, {});
+    const includeTypes = loadJSON(LS_TYPE_FILTER, null);
+    const afterEpoch = Math.floor((Date.now() - LOOKBACK_DAYS*24*60*60*1000) / 1000);
+    myAthleteId = (loadJSON(LS_ATHLETE, {}) || {}).id;
+
+    const myCounts = {};
+    Object.keys(activities).forEach(id => {
+      const act = activities[id];
+      if(includeTypes && !includeTypes.includes(act.sport_type)) return;
+      const efforts = detailCache[id] || [];
+      efforts.forEach(e => {
+        if(new Date(e.startDate).getTime() < afterEpoch*1000) return;
+        if(!myCounts[e.segmentId]) myCounts[e.segmentId] = { count: 0, name: e.segmentName };
+        myCounts[e.segmentId].count++;
+      });
+    });
+
+    return Object.keys(myCounts).map(segId => {
+      const info = segInfo[segId] || {};
+      const legend = info.legend || null;
+      const myCount = myCounts[segId].count;
+      const name = info.name || myCounts[segId].name;
+      const amLegend = !!(legend && myAthleteId && legend.athleteId === myAthleteId);
+      const legendCount = legend ? legend.effortCount : null;
+      let runsAway;
+      if(amLegend) runsAway = 0;
+      else if(legendCount != null) runsAway = Math.max(legendCount - myCount + 1, 0);
+      else runsAway = null;
+      return {
+        segId, name, myCount,
+        legendName: legend ? legend.title : (info.error ? 'unavailable' : '—'),
+        legendCount,
+        runsAway,
+        amLegend
+      };
+    });
+  }
+
+  function renderTable(){
+    const rows = buildRows();
+    emptyMsg.style.display = rows.length ? 'none' : 'block';
+
+    document.querySelectorAll('#segTable th').forEach(th => {
+      const arrow = th.querySelector('.arrow');
+      if(arrow) arrow.remove();
+      if(th.dataset.key === sortKey){
+        const span = document.createElement('span');
+        span.className = 'arrow';
+        span.textContent = sortDir === 1 ? '▲' : '▼';
+        th.appendChild(span);
+      }
+    });
+
+    rows.sort((a, b) => {
+      let av = a[sortKey], bv = b[sortKey];
+      if(av == null) av = sortKey === 'runsAway' ? Infinity : -Infinity;
+      if(bv == null) bv = sortKey === 'runsAway' ? Infinity : -Infinity;
+      if(typeof av === 'string') return av.localeCompare(bv) * sortDir;
+      return (av - bv) * sortDir;
+    });
+
+    segTableBody.innerHTML = '';
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      const laurel = r.amLegend ? '<span class="laurel" title="You are the local legend">\u{1F3C6}</span>' : '';
+      tr.innerHTML = `
+        <td class="seg-name">${laurel}<a href="https://www.strava.com/segments/${r.segId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>
+        <td class="num">${r.myCount}</td>
+        <td class="legend-name">${escapeHtml(r.legendName)}</td>
+        <td class="num">${r.legendCount != null ? r.legendCount : '—'}</td>
+        <td class="num">${r.amLegend ? 'Legend' : (r.runsAway != null ? r.runsAway : '—')}</td>
+      `;
+      segTableBody.appendChild(tr);
+    });
+  }
+
+  function escapeHtml(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // initial paint if already connected
+  if(loadTok()) renderTable();
+})();
+</script>
+</body>
+</html>

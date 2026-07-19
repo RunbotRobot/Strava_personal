@@ -206,7 +206,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.4.0";
+  const APP_VERSION = "1.5.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -229,12 +229,7 @@
     }
     document.addEventListener('fullscreenchange', updateLabel);
 
-    btn.onclick = async () => {
-      if(document.fullscreenElement){
-        try{ await document.exitFullscreen(); }catch(err){ /* non-fatal */ }
-        updateLabel();
-        return;
-      }
+    async function tryLock(){
       try{
         await document.documentElement.requestFullscreen();
         // A specific direction, not the generic 'landscape' — that let the
@@ -245,7 +240,34 @@
         console.warn('Landscape lock unavailable, falling back to rotated view:', err.message);
       }
       updateLabel();
+    }
+
+    btn.onclick = async () => {
+      if(document.fullscreenElement){
+        try{ await document.exitFullscreen(); }catch(err){ /* non-fatal */ }
+        updateLabel();
+        return;
+      }
+      await tryLock();
     };
+
+    // Browsers require a real tap before allowing fullscreen/orientation
+    // changes — there's no way to skip that entirely — but we can piggyback
+    // on the user's very first tap anywhere so they never have to find and
+    // press the button themselves. Skipped for taps on text/password fields
+    // so it doesn't yank focus away mid-typing (e.g. pasting the sync
+    // secret in for the first time).
+    function firstInteractionAutoLock(e){
+      if(document.fullscreenElement){
+        document.removeEventListener('pointerdown', firstInteractionAutoLock, true);
+        return;
+      }
+      const tag = e.target.tagName;
+      if(tag === 'INPUT' || tag === 'TEXTAREA') return; // not this tap — keep waiting for a better one
+      document.removeEventListener('pointerdown', firstInteractionAutoLock, true);
+      tryLock();
+    }
+    document.addEventListener('pointerdown', firstInteractionAutoLock, true);
   })();
 
   // ---------- storage ----------

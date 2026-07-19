@@ -100,7 +100,7 @@
     font-size:9.5px; text-transform:uppercase; letter-spacing:.02em; white-space:normal;
   }
   th:hover{color:var(--text);}
-  th .arrow{font-size:9px; margin-left:2px;}
+  th .arrow{display:block; font-size:9px; text-align:center; margin-bottom:1px;}
   th.num, td.num{width:44px; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;}
   td.seg-name{white-space:normal; word-break:break-word;}
   td.seg-name a{color:var(--text); text-decoration:none; border-bottom:1px solid var(--border);}
@@ -206,7 +206,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.8.0";
+  const APP_VERSION = "1.8.1";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -791,7 +791,7 @@
         const span = document.createElement('span');
         span.className = 'arrow';
         span.textContent = sortDir === 1 ? '▲' : '▼';
-        th.appendChild(span);
+        th.insertBefore(span, th.firstChild);
       }
     });
 

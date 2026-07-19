@@ -206,7 +206,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.7.0";
+  const APP_VERSION = "1.8.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -457,10 +457,34 @@
     refreshStatusUI();
   })();
 
+  // These used to only be saved by the "Connect to Strava" button — which is
+  // hidden once already connected, so there was no way to edit the relay URL
+  // (or client ID/secret) without disconnecting first. Auto-save on change,
+  // same as the sync secret field, so edits stick regardless of connection
+  // state.
+  stravaClientId.onchange = () => {
+    const cfg = loadCfg();
+    cfg.clientId = stravaClientId.value.trim();
+    saveCfg(cfg);
+    setSyncStatus('Client ID saved.');
+  };
+  stravaClientSecret.onchange = () => {
+    const cfg = loadCfg();
+    cfg.clientSecret = stravaClientSecret.value.trim();
+    saveCfg(cfg);
+    setSyncStatus('Client Secret saved.');
+  };
+  stravaProxy.onchange = () => {
+    const cfg = loadCfg();
+    cfg.proxy = stravaProxy.value.trim().replace(/\/$/, '');
+    saveCfg(cfg);
+    setSyncStatus('Token relay URL saved: ' + cfg.proxy);
+  };
   stravaSyncSecret.onchange = () => {
     const cfg = loadCfg();
     cfg.syncSecret = stravaSyncSecret.value.trim();
     saveCfg(cfg);
+    setSyncStatus('Worker sync secret saved.');
   };
 
   function refreshStatusUI(){

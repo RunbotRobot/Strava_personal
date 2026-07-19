@@ -176,6 +176,17 @@
         and the same Client ID/Secret you already use for RouteGuard — Strava's callback check only cares about
         the domain, not the path.
       </p>
+      <div class="row" style="margin-top:8px;">
+        <div class="field-group">
+          <span class="field-label">Worker sync secret (optional)</span>
+          <input class="field-input" id="stravaSyncSecret" type="password" placeholder="matches STRAVA_SYNC_SECRET on the worker" />
+        </div>
+      </div>
+      <p class="small-note">
+        If set, synced data is also persisted on the worker (same one as above) instead of relying solely on
+        this browser's localStorage, which shares its quota with RouteGuard on this same site. Leave blank to
+        keep everything local-only, as before.
+      </p>
       <button class="primary" id="btnStravaConnect" style="margin-top:8px;">Connect to Strava</button>
       <button class="danger-text" id="btnStravaDisconnect" style="margin-top:8px; display:none;">Disconnect</button>
     </div>
@@ -186,7 +197,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.0.0";
+  const APP_VERSION = "1.1.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -222,6 +233,7 @@
   const stravaClientId = document.getElementById('stravaClientId');
   const stravaClientSecret = document.getElementById('stravaClientSecret');
   const stravaProxy = document.getElementById('stravaProxy');
+  const stravaSyncSecret = document.getElementById('stravaSyncSecret');
   const stravaStatusEl = document.getElementById('stravaStatus');
   const btnStravaConnect = document.getElementById('btnStravaConnect');
   const btnStravaDisconnect = document.getElementById('btnStravaDisconnect');
@@ -265,6 +277,7 @@
     if(btnEl.dataset.action === 'hide') hidden.add(segId); else hidden.delete(segId);
     saveHidden(hidden);
     renderTable();
+    pushToWorker();
   });
 
   function requestLocation(){
@@ -284,14 +297,73 @@
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   }
 
+  // ---------- worker-backed persistence (optional — inert unless a sync secret is set) ----------
+  function gatherPersistedState(){
+    return {
+      activities: loadJSON(LS_ACTIVITIES, {}),
+      activityDetail: loadJSON(LS_ACTIVITY_DETAIL, {}),
+      segmentInfo: loadJSON(LS_SEGMENT_INFO, {}),
+      lastSync: loadJSON(LS_LAST_SYNC, null),
+      hiddenSegments: loadJSON(LS_HIDDEN_SEGMENTS, [])
+    };
+  }
+
+  function applyPersistedState(state){
+    if(!state) return;
+    saveJSON(LS_ACTIVITIES, state.activities || {});
+    saveJSON(LS_ACTIVITY_DETAIL, state.activityDetail || {});
+    saveJSON(LS_SEGMENT_INFO, state.segmentInfo || {});
+    if(state.lastSync != null) saveJSON(LS_LAST_SYNC, state.lastSync);
+    saveJSON(LS_HIDDEN_SEGMENTS, state.hiddenSegments || []);
+  }
+
+  async function pullFromWorker(){
+    const cfg = loadCfg();
+    if(!cfg.proxy || !cfg.syncSecret) return false;
+    try{
+      const res = await fetch(cfg.proxy + '/strava-state', {
+        headers: { Authorization: 'Bearer ' + cfg.syncSecret }
+      });
+      if(!res.ok) throw new Error('worker responded ' + res.status);
+      const state = await res.json();
+      if(state) applyPersistedState(state);
+      return true;
+    }catch(err){
+      console.warn('Could not load persisted state from worker (using local cache):', err.message);
+      return false;
+    }
+  }
+
+  async function pushToWorker(){
+    const cfg = loadCfg();
+    if(!cfg.proxy || !cfg.syncSecret) return;
+    try{
+      const res = await fetch(cfg.proxy + '/strava-state', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.syncSecret },
+        body: JSON.stringify(gatherPersistedState())
+      });
+      if(!res.ok) throw new Error('worker responded ' + res.status);
+    }catch(err){
+      console.warn('Could not persist state to worker (kept locally only):', err.message);
+    }
+  }
+
   // ---------- OAuth ----------
   (function initFields(){
     const cfg = loadCfg();
     stravaClientId.value = cfg.clientId || '';
     stravaClientSecret.value = cfg.clientSecret || '';
     stravaProxy.value = cfg.proxy || '';
+    stravaSyncSecret.value = cfg.syncSecret || '';
     refreshStatusUI();
   })();
+
+  stravaSyncSecret.onchange = () => {
+    const cfg = loadCfg();
+    cfg.syncSecret = stravaSyncSecret.value.trim();
+    saveCfg(cfg);
+  };
 
   function refreshStatusUI(){
     const tok = loadTok();
@@ -303,9 +375,11 @@
     syncPanel.style.display = connected ? 'block' : 'none';
     tablePanel.style.display = connected ? 'block' : 'none';
     if(connected){
-      updateLastSyncedLabel();
-      requestLocation();
-      renderTable();
+      pullFromWorker().finally(() => {
+        updateLastSyncedLabel();
+        requestLocation();
+        renderTable();
+      });
     }
   }
 
@@ -313,7 +387,8 @@
     const cfg = {
       clientId: stravaClientId.value.trim(),
       clientSecret: stravaClientSecret.value.trim(),
-      proxy: stravaProxy.value.trim().replace(/\/$/, '')
+      proxy: stravaProxy.value.trim().replace(/\/$/, ''),
+      syncSecret: stravaSyncSecret.value.trim()
     };
     if(!cfg.clientId || !cfg.clientSecret || !cfg.proxy){
       setSyncStatus('Fill in Client ID, Client Secret, and your token relay URL first.');
@@ -419,6 +494,7 @@
     setSyncStatus('Cache cleared.');
     updateLastSyncedLabel();
     renderTable();
+    pushToWorker();
   };
 
   btnSync.onclick = () => runSync().catch(err => setSyncStatus('Sync failed: ' + err.message));
@@ -514,6 +590,7 @@
       updateLastSyncedLabel();
       setSyncStatus('Synced ' + new Date(now).toLocaleString() + '.');
       renderTable();
+      await pushToWorker();
     } finally {
       btnSync.disabled = false;
     }
@@ -619,13 +696,6 @@
 
   function escapeHtml(s){
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
-
-  // initial paint if already connected
-  if(loadTok()){
-    updateLastSyncedLabel();
-    requestLocation();
-    renderTable();
   }
 })();
 </script>

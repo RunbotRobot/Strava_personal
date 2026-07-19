@@ -39,16 +39,40 @@ This is a static page — no build step, no backend of its own. It talks to Stra
    per activity, plus one per unique segment), so it can take a bit and is deliberately paced to stay under
    Strava's rate limits. Subsequent syncs only fetch what's new.
 
-All credentials and data are stored only in your browser's `localStorage` — nothing leaves your device except
-calls to Strava's own API and the token relay.
+All credentials and data are stored in your browser's `localStorage` by default — nothing leaves your device
+except calls to Strava's own API and the token relay, unless you set up worker persistence (below).
 
 **On localStorage and RouteGuard**: both apps are hosted under the same GitHub Pages account domain
 (`yourname.github.io`), just at different paths (`/routeguard`, `/strava_personal`). `localStorage` is scoped
 per-*origin* (scheme + host), not per-path, so the ~5–10MB quota (browser-dependent) is a single shared pool
 across both apps, not a separate allowance each. This app uses an `sp_` key prefix (RouteGuard uses `rg_`) so
-the two never collide, but they do draw from the same bucket. In practice this dashboard's data (a season's
-worth of activity/segment metadata as JSON) is a tiny fraction of that quota, so it's not a practical concern
-unless RouteGuard's cached map/route data is already pushing the limit on its own.
+the two never collide directly, but RouteGuard's map cache regularly fills that shared pool and evicts its own
+data to cope — see "Worker persistence" below for how this app avoids getting caught in that squeeze.
+
+## Worker persistence (optional, recommended)
+
+RouteGuard's tile/route cache runs into the shared localStorage quota often enough that it has its own LRU
+eviction logic. That eviction only ever touches RouteGuard's own keys — it can't delete this app's data — but
+once RouteGuard has filled the *entire* shared quota, this app's own `localStorage` writes can start failing
+too, until RouteGuard's eviction frees some of that shared space back up. To sidestep that entirely, this app
+can optionally persist its synced data server-side, on the same Cloudflare Worker used for the OAuth token
+relay (`RunbotRobot/routeguard-worker`), via a `/strava-state` endpoint added there.
+
+To turn it on:
+1. In the Cloudflare dashboard, open that worker → **Settings → Variables and Secrets → Add** → name it
+   `STRAVA_SYNC_SECRET`, value can be any long random string you pick. This is the only manual step —
+   everything else about the endpoint is already deployed.
+2. Paste that same value into this app's **Worker sync secret** field (Strava Connection panel).
+3. That's it — every sync (and every hide/unhide) now also pushes the full cached state to the worker, and
+   the app pulls it back from there on load, before falling back to whatever's in localStorage if the worker
+   is unreachable.
+
+Leaving the field blank keeps everything exactly as it was — local-only, no server round trip. The
+`/strava-state` endpoint itself refuses all requests until `STRAVA_SYNC_SECRET` is set, so there's no
+window where it's live but unprotected.
+
+Long-term, once custom domains are in the picture, each app would get fully separate localStorage anyway —
+this worker step is the practical fix for right now.
 
 ## Notes / known limitations
 

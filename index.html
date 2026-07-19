@@ -65,7 +65,6 @@
   td.seg-name a{color:var(--text); text-decoration:none; border-bottom:1px solid var(--border);}
   td.seg-name a:hover{border-color:var(--text);}
   .laurel{margin-right:4px;}
-  .legend-name{color:var(--muted);}
   .table-wrap{overflow-x:auto;}
   .empty-msg{color:var(--muted); font-size:13px; padding:8px 0;}
   .filters{margin-bottom:10px;}
@@ -128,8 +127,7 @@
           <tr>
             <th data-key="name">Segment</th>
             <th data-key="myCount">My Efforts</th>
-            <th data-key="legendName">Local Legend</th>
-            <th data-key="legendCount">Their Efforts</th>
+            <th data-key="legendCount">Legend's Efforts</th>
             <th data-key="runsAway">Runs to Beat</th>
           </tr>
         </thead>
@@ -396,7 +394,6 @@
             name: detail.name || myCounts[id].name,
             legend: detail.local_legend ? {
               athleteId: detail.local_legend.athlete_id,
-              title: detail.local_legend.title,
               effortCount: detail.local_legend.effort_count
             } : null,
             fetchedAt: now
@@ -491,8 +488,8 @@
       else runsAway = null;
       return {
         segId, name, myCount,
-        legendName: legend ? legend.title : (info.error ? 'unavailable' : '—'),
         legendCount,
+        legendUnavailable: !legend && !!info.error,
         runsAway,
         amLegend
       };
@@ -529,8 +526,7 @@
       tr.innerHTML = `
         <td class="seg-name">${laurel}<a href="https://www.strava.com/segments/${r.segId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>
         <td class="num">${r.myCount}</td>
-        <td class="legend-name">${escapeHtml(r.legendName)}</td>
-        <td class="num">${r.legendCount != null ? r.legendCount : '—'}</td>
+        <td class="num">${r.legendCount != null ? r.legendCount : (r.legendUnavailable ? 'unavailable' : '—')}</td>
         <td class="num">${r.amLegend ? 'Legend' : (r.runsAway != null ? r.runsAway : '—')}</td>
       `;
       segTableBody.appendChild(tr);

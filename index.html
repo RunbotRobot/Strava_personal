@@ -206,7 +206,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.5.0";
+  const APP_VERSION = "1.6.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -253,21 +253,25 @@
 
     // Browsers require a real tap before allowing fullscreen/orientation
     // changes — there's no way to skip that entirely — but we can piggyback
-    // on the user's very first tap anywhere so they never have to find and
-    // press the button themselves. Skipped for taps on text/password fields
-    // so it doesn't yank focus away mid-typing (e.g. pasting the sync
-    // secret in for the first time).
+    // on the user's first suitable tap so they never have to find and press
+    // the button themselves. This has to listen for 'click', not
+    // 'pointerdown': testing showed pointerdown alone doesn't carry enough
+    // "user activation" for Chrome to allow requestFullscreen(), only a
+    // completed tap does. Practically, that means a pure scroll gesture
+    // (finger down, drag, no tap) won't trigger this — only an actual tap
+    // will (on a table header, an eye icon, a button, anywhere except a
+    // text/password field, so it doesn't yank focus away mid-typing).
     function firstInteractionAutoLock(e){
       if(document.fullscreenElement){
-        document.removeEventListener('pointerdown', firstInteractionAutoLock, true);
+        document.removeEventListener('click', firstInteractionAutoLock, true);
         return;
       }
       const tag = e.target.tagName;
       if(tag === 'INPUT' || tag === 'TEXTAREA') return; // not this tap — keep waiting for a better one
-      document.removeEventListener('pointerdown', firstInteractionAutoLock, true);
+      document.removeEventListener('click', firstInteractionAutoLock, true);
       tryLock();
     }
-    document.addEventListener('pointerdown', firstInteractionAutoLock, true);
+    document.addEventListener('click', firstInteractionAutoLock, true);
   })();
 
   // ---------- storage ----------
@@ -648,7 +652,10 @@
       const segInfo = loadJSON(LS_SEGMENT_INFO, {});
       const segIds = Object.keys(myCounts);
       const now = Date.now();
-      const staleIds = segIds.filter(id => !segInfo[id] || (now - segInfo[id].fetchedAt) > SEGMENT_INFO_TTL_MS);
+      // also refetch anything cached before startLatlng existed on this
+      // object shape at all (backfill for the "Mi To Start" feature), even
+      // if it's otherwise within the TTL
+      const staleIds = segIds.filter(id => !segInfo[id] || segInfo[id].startLatlng === undefined || (now - segInfo[id].fetchedAt) > SEGMENT_INFO_TTL_MS);
       for(let i=0; i<staleIds.length; i++){
         const id = staleIds[i];
         setSyncStatus(`Fetching segment info ${i+1}/${staleIds.length}...`);

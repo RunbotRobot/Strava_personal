@@ -6,12 +6,22 @@ A personal, single-page dashboard for Strava data. Built incrementally — featu
 
 Shows every segment you've run in the last 90 days, alongside:
 
-- **My Efforts** — how many times you've run it in that window
-- **Local Legend** — who currently holds it, and their effort count
-- **Runs to Beat** — how many more runs you need to surpass them (ties don't count — you have to pass them)
+- **Mine** — how many times you've run it in that window
+- **Legend** — the current local legend's effort count in that window (efforts from before the segment
+  existed don't count toward either side of this comparison)
+- **To Beat** — how many more runs you need to surpass them (ties don't count — you have to pass them)
+- **Mi To Start** — straight-line distance from your location when the page loaded to the segment's start
 - A trophy icon next to segments where you're already the legend
 
-Click a segment name to open it on Strava in a new tab. Click any column header to sort by it.
+Click a segment name to open it on Strava in a new tab. Click any column header to sort by it. Tap the
+closed-eye icon to hide a segment you don't want cluttering the list (e.g. one you're not allowed back on
+for community-custody reasons) — check "Show hidden segments" to bring one back.
+
+Activities recorded as `Velomobile` are always excluded — that type is reserved for car-recorded scouting
+routes, not real efforts.
+
+The page forces a landscape layout even if your phone's rotation lock is set to portrait (pure CSS, no
+permissions needed) — turn the phone clockwise to read it right-side up.
 
 ## Setup
 
@@ -32,11 +42,20 @@ This is a static page — no build step, no backend of its own. It talks to Stra
 All credentials and data are stored only in your browser's `localStorage` — nothing leaves your device except
 calls to Strava's own API and the token relay.
 
+**On localStorage and RouteGuard**: both apps are hosted under the same GitHub Pages account domain
+(`yourname.github.io`), just at different paths (`/routeguard`, `/strava_personal`). `localStorage` is scoped
+per-*origin* (scheme + host), not per-path, so the ~5–10MB quota (browser-dependent) is a single shared pool
+across both apps, not a separate allowance each. This app uses an `sp_` key prefix (RouteGuard uses `rg_`) so
+the two never collide, but they do draw from the same bucket. In practice this dashboard's data (a season's
+worth of activity/segment metadata as JSON) is a tiny fraction of that quota, so it's not a practical concern
+unless RouteGuard's cached map/route data is already pushing the limit on its own.
+
 ## Notes / known limitations
 
 - Strava's public API docs don't officially document the `local_legend` field on segment details, even
   though the Strava app itself shows this data. If a segment shows "unavailable" for the legend column,
   it means that field wasn't present in the API response for that segment — open an issue (or just mention
   it) with the segment ID so the parsing can be adjusted.
-- The "run" filter defaults to activity types containing "Run" (covers `Run` and `TrailRun`). Checkboxes
-  let you include other activity types the moment you need segment tracking for rides, walks, etc.
+- "Mi To Start" needs location permission; if you deny it or it can't get a fix, that column just shows "—".
+- The forced-landscape CSS trick can only guess one physical rotation direction. If it displays upside-down
+  or mirrored for you, it's a one-line sign flip to fix — just say so.

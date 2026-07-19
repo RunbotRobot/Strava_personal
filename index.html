@@ -18,11 +18,29 @@
     }
   }
   *{box-sizing:border-box;}
+  html, body{ margin:0; padding:0; height:100%; }
   body{
-    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-    background:var(--bg); color:var(--text); padding:16px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg); color:var(--text);
   }
+  #appRoot{ padding:16px; }
+
+  /* Force a landscape layout even when the device's rotation lock is set to
+     portrait — the phone itself never rotates, we just rotate our own box. */
+  @media screen and (orientation: portrait){
+    html, body{ width:100vw; height:100vh; overflow:hidden; position:fixed; top:0; left:0; }
+    #appRoot{
+      width:100vh; height:100vw;
+      transform:rotate(-90deg);
+      transform-origin:top left;
+      position:absolute; top:100%; left:0;
+      overflow-y:auto; overflow-x:hidden;
+      -webkit-overflow-scrolling:touch;
+    }
+  }
+
   h1{font-size:20px; margin:0 0 2px;}
+  .version-badge{font-size:11px; font-weight:400; color:var(--muted); margin-left:6px;}
   .subtitle{color:var(--muted); font-size:13px; margin:0 0 16px;}
   .panel{
     background:var(--panel); border:1px solid var(--border); border-radius:10px;
@@ -53,19 +71,25 @@
     .status-pill.disconnected{background:#2e2513;}
   }
   #syncStatus{font-size:12px; color:var(--muted); margin-top:8px; min-height:16px;}
-  table{width:100%; border-collapse:collapse; font-size:12.5px; table-layout:fixed;}
-  th, td{text-align:left; padding:6px 4px; border-bottom:1px solid var(--border); overflow-wrap:break-word;}
+  #lastSyncedLabel{font-size:12px; color:var(--muted); margin-top:6px;}
+  table{width:100%; border-collapse:collapse; font-size:12px; table-layout:fixed;}
+  th, td{text-align:left; padding:6px 3px; border-bottom:1px solid var(--border); overflow-wrap:break-word;}
   th{
     cursor:pointer; user-select:none; color:var(--muted); font-weight:600;
-    font-size:10px; text-transform:uppercase; letter-spacing:.02em; white-space:normal;
+    font-size:9.5px; text-transform:uppercase; letter-spacing:.02em; white-space:normal;
   }
   th:hover{color:var(--text);}
   th .arrow{font-size:9px; margin-left:2px;}
-  th.num, td.num{width:52px; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;}
+  th.num, td.num{width:44px; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;}
   td.seg-name{white-space:normal; word-break:break-word;}
   td.seg-name a{color:var(--text); text-decoration:none; border-bottom:1px solid var(--border);}
   td.seg-name a:hover{border-color:var(--text);}
   .laurel{margin-right:2px;}
+  .icon-btn{
+    background:none; border:none; padding:0; margin-right:4px; font-size:13px;
+    cursor:pointer; line-height:1; vertical-align:middle;
+  }
+  tr.row-hidden{opacity:.45;}
   .table-wrap{overflow-x:auto;}
   .empty-msg{color:var(--muted); font-size:13px; padding:8px 0;}
   .filters{margin-bottom:10px;}
@@ -75,9 +99,42 @@
 </style>
 </head>
 <body>
+<div id="appRoot">
 
-  <h1>Strava Personal</h1>
+  <h1>Strava Personal<span class="version-badge" id="appVersion"></span></h1>
   <p class="subtitle">Local Legend tracker — segments run in the last <span id="lookbackDaysLabel">90</span> days</p>
+
+  <div class="panel" id="syncPanel" style="display:none;">
+    <h2>Sync</h2>
+    <div class="row">
+      <button class="primary" id="btnSync">Sync last 90 days</button>
+      <button id="btnClearCache">Clear cached data</button>
+    </div>
+    <div id="syncStatus"></div>
+    <div id="lastSyncedLabel">Last synced: never</div>
+  </div>
+
+  <div class="panel" id="tablePanel" style="display:none;">
+    <h2>Segments</h2>
+    <div class="filters" id="segmentFilters">
+      <label><input type="checkbox" id="cbShowHidden" /> Show hidden segments</label>
+    </div>
+    <div class="table-wrap">
+      <table id="segTable">
+        <thead>
+          <tr>
+            <th data-key="name">Segment</th>
+            <th data-key="myCount" class="num" title="Your efforts in the last 90 days">Mine</th>
+            <th data-key="legendCount" class="num" title="Current local legend's efforts in the last 90 days">Legend</th>
+            <th data-key="runsAway" class="num" title="More runs needed to surpass the local legend">To&nbsp;Beat</th>
+            <th data-key="distanceMi" class="num" title="Distance from your current location to the segment start">Mi&nbsp;To&nbsp;Start</th>
+          </tr>
+        </thead>
+        <tbody id="segTableBody"></tbody>
+      </table>
+      <div class="empty-msg" id="emptyMsg" style="display:none;">No segments found in this window yet — run Sync.</div>
+    </div>
+  </div>
 
   <div class="panel" id="connectPanel">
     <h2>Strava Connection</h2>
@@ -110,37 +167,13 @@
     </div>
   </div>
 
-  <div class="panel" id="syncPanel" style="display:none;">
-    <h2>Sync</h2>
-    <div class="row">
-      <button class="primary" id="btnSync">Sync last 90 days</button>
-      <button id="btnClearCache">Clear cached data</button>
-    </div>
-    <div id="syncStatus"></div>
-  </div>
-
-  <div class="panel" id="tablePanel" style="display:none;">
-    <h2>Segments</h2>
-    <div class="filters" id="typeFilters"></div>
-    <div class="table-wrap">
-      <table id="segTable">
-        <thead>
-          <tr>
-            <th data-key="name">Segment</th>
-            <th data-key="myCount" class="num" title="Your efforts in the last 90 days">Mine</th>
-            <th data-key="legendCount" class="num" title="Current local legend's efforts in the last 90 days">Legend</th>
-            <th data-key="runsAway" class="num" title="More runs needed to surpass the local legend">To&nbsp;Beat</th>
-          </tr>
-        </thead>
-        <tbody id="segTableBody"></tbody>
-      </table>
-      <div class="empty-msg" id="emptyMsg" style="display:none;">No segments found in this window yet — run Sync.</div>
-    </div>
-  </div>
-
+</div>
 <script>
 (function(){
   "use strict";
+
+  const APP_VERSION = "1.0.0";
+  document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
   document.getElementById('lookbackDaysLabel').textContent = LOOKBACK_DAYS;
@@ -151,11 +184,13 @@
   const LS_ATHLETE = "sp_athlete";          // {id, firstname, lastname}
   const LS_ACTIVITIES = "sp_activities";    // {id: summaryActivity}
   const LS_ACTIVITY_DETAIL = "sp_activity_detail"; // {id: [{segmentId, segmentName, startDate}]}
-  const LS_SEGMENT_INFO = "sp_segment_info"; // {id: {name, createdAt, legend:{athleteId,effortCount}|null, fetchedAt}}
+  const LS_SEGMENT_INFO = "sp_segment_info"; // {id: {name, createdAt, startLatlng, legend:{athleteId,effortCount}|null, fetchedAt}}
   const LS_LAST_SYNC = "sp_last_sync";
-  const LS_TYPE_FILTER = "sp_type_filter";  // array of sport_type strings to include
+  const LS_HIDDEN_SEGMENTS = "sp_hidden_segments"; // array of segment id strings
 
   const SEGMENT_INFO_TTL_MS = 6 * 60 * 60 * 1000; // 6h — legend status can change as others run
+  const EXCLUDED_SPORT_TYPES = new Set(['Velomobile']); // car-recorded routes, not real efforts
+  const NUMERIC_KEYS = new Set(['myCount', 'legendCount', 'runsAway', 'distanceMi']);
 
   function loadJSON(key, fallback){ try{ const v = JSON.parse(localStorage.getItem(key)); return v==null?fallback:v; }catch(e){ return fallback; } }
   function saveJSON(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
@@ -165,6 +200,9 @@
   function loadTok(){ return loadJSON(LS_TOK, null); }
   function saveTok(t){ saveJSON(LS_TOK, t); }
   function clearTok(){ localStorage.removeItem(LS_TOK); }
+
+  function loadHidden(){ return new Set(loadJSON(LS_HIDDEN_SEGMENTS, [])); }
+  function saveHidden(set){ saveJSON(LS_HIDDEN_SEGMENTS, Array.from(set)); }
 
   // ---------- DOM refs ----------
   const stravaClientId = document.getElementById('stravaClientId');
@@ -178,15 +216,22 @@
   const btnSync = document.getElementById('btnSync');
   const btnClearCache = document.getElementById('btnClearCache');
   const syncStatusEl = document.getElementById('syncStatus');
-  const typeFiltersEl = document.getElementById('typeFilters');
+  const lastSyncedLabel = document.getElementById('lastSyncedLabel');
+  const cbShowHidden = document.getElementById('cbShowHidden');
   const segTableBody = document.getElementById('segTableBody');
   const emptyMsg = document.getElementById('emptyMsg');
 
   function setSyncStatus(msg){ syncStatusEl.textContent = msg || ''; }
 
+  function updateLastSyncedLabel(){
+    const ts = loadJSON(LS_LAST_SYNC, null);
+    lastSyncedLabel.textContent = 'Last synced: ' + (ts ? new Date(ts).toLocaleString() : 'never');
+  }
+
   // ---------- table render state (must exist before initFields() below can call renderTable) ----------
   let myAthleteId = (loadJSON(LS_ATHLETE, {}) || {}).id;
   let sortKey = 'runsAway', sortDir = 1;
+  let userLocation = null; // {lat, lng}, populated by requestLocation()
 
   document.querySelectorAll('#segTable th').forEach(th => {
     th.addEventListener('click', () => {
@@ -195,6 +240,35 @@
       renderTable();
     });
   });
+
+  cbShowHidden.onchange = () => renderTable();
+
+  segTableBody.addEventListener('click', (e) => {
+    const btnEl = e.target.closest('.icon-btn');
+    if(!btnEl) return;
+    const segId = btnEl.dataset.seg;
+    const hidden = loadHidden();
+    if(btnEl.dataset.action === 'hide') hidden.add(segId); else hidden.delete(segId);
+    saveHidden(hidden);
+    renderTable();
+  });
+
+  function requestLocation(){
+    if(!('geolocation' in navigator)) return;
+    navigator.geolocation.getCurrentPosition(
+      pos => { userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude }; renderTable(); },
+      err => { console.warn('geolocation unavailable (non-fatal):', err.message); },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5*60*1000 }
+    );
+  }
+
+  function haversineMiles(lat1, lng1, lat2, lng2){
+    const R = 3958.8; // Earth radius, miles
+    const toRad = d => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
 
   // ---------- OAuth ----------
   (function initFields(){
@@ -214,7 +288,11 @@
     btnStravaDisconnect.style.display = connected ? 'block' : 'none';
     syncPanel.style.display = connected ? 'block' : 'none';
     tablePanel.style.display = connected ? 'block' : 'none';
-    if(connected) renderTable();
+    if(connected){
+      updateLastSyncedLabel();
+      requestLocation();
+      renderTable();
+    }
   }
 
   btnStravaConnect.onclick = () => {
@@ -325,10 +403,13 @@
   btnClearCache.onclick = () => {
     [LS_ACTIVITIES, LS_ACTIVITY_DETAIL, LS_SEGMENT_INFO, LS_LAST_SYNC].forEach(k => localStorage.removeItem(k));
     setSyncStatus('Cache cleared.');
+    updateLastSyncedLabel();
     renderTable();
   };
 
   btnSync.onclick = () => runSync().catch(err => setSyncStatus('Sync failed: ' + err.message));
+
+  function isEligibleSportType(t){ return !EXCLUDED_SPORT_TYPES.has(t); }
 
   async function runSync(){
     btnSync.disabled = true;
@@ -358,15 +439,9 @@
       });
       saveJSON(LS_ACTIVITIES, activities);
 
-      // 2. build/update the type filter UI from what we've seen
-      renderTypeFilters(activities);
-      const includeTypes = loadJSON(LS_TYPE_FILTER, null);
-      const allIds = Object.keys(activities).filter(id => {
-        const t = activities[id].sport_type;
-        return !includeTypes || includeTypes.includes(t);
-      });
+      const allIds = Object.keys(activities).filter(id => isEligibleSportType(activities[id].sport_type));
 
-      // 3. fetch activity detail (segment_efforts) for any activity not yet cached
+      // 2. fetch activity detail (segment_efforts) for any activity not yet cached
       const detailCache = loadJSON(LS_ACTIVITY_DETAIL, {});
       const missing = allIds.filter(id => !detailCache[id]);
       for(let i=0; i<missing.length; i++){
@@ -382,7 +457,7 @@
         await sleep(120);
       }
 
-      // 4. aggregate my effort counts per segment within the window
+      // 3. aggregate my effort counts per segment within the window (segIds only, for the segment-info fetch list)
       const myCounts = {}; // segmentId -> {count, name}
       allIds.forEach(id => {
         const efforts = detailCache[id] || [];
@@ -393,7 +468,7 @@
         });
       });
 
-      // 5. fetch/refresh segment info (local legend) for each segment encountered
+      // 4. fetch/refresh segment info (local legend, creation date, start location) for each segment encountered
       const segInfo = loadJSON(LS_SEGMENT_INFO, {});
       const segIds = Object.keys(myCounts);
       const now = Date.now();
@@ -406,9 +481,10 @@
           segInfo[id] = {
             name: detail.name || myCounts[id].name,
             createdAt: detail.created_at || null,
+            startLatlng: detail.start_latlng || null,
             legend: detail.local_legend ? {
               athleteId: detail.local_legend.athlete_id,
-              effortCount: detail.local_legend.effort_count
+              effortCount: Number(detail.local_legend.effort_count)
             } : null,
             fetchedAt: now
           };
@@ -421,6 +497,7 @@
       }
 
       saveJSON(LS_LAST_SYNC, now);
+      updateLastSyncedLabel();
       setSyncStatus('Synced ' + new Date(now).toLocaleString() + '.');
       renderTable();
     } finally {
@@ -428,48 +505,19 @@
     }
   }
 
-  // ---------- type filters ----------
-  function renderTypeFilters(activities){
-    const seen = Array.from(new Set(Object.values(activities).map(a => a.sport_type))).sort();
-    if(!seen.length) return;
-    let selected = loadJSON(LS_TYPE_FILTER, null);
-    if(!selected){
-      // default: run-like types only
-      selected = seen.filter(t => /run/i.test(t));
-      if(!selected.length) selected = seen.slice();
-      saveJSON(LS_TYPE_FILTER, selected);
-    }
-    typeFiltersEl.innerHTML = '';
-    seen.forEach(t => {
-      const id = 'tf_' + t;
-      const label = document.createElement('label');
-      const cb = document.createElement('input');
-      cb.type = 'checkbox'; cb.id = id; cb.checked = selected.includes(t);
-      cb.onchange = () => {
-        const cur = loadJSON(LS_TYPE_FILTER, []);
-        const next = cb.checked ? Array.from(new Set([...cur, t])) : cur.filter(x => x !== t);
-        saveJSON(LS_TYPE_FILTER, next);
-        renderTable();
-      };
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(t));
-      typeFiltersEl.appendChild(label);
-    });
-  }
-
   // ---------- table render ----------
   function buildRows(){
     const activities = loadJSON(LS_ACTIVITIES, {});
     const detailCache = loadJSON(LS_ACTIVITY_DETAIL, {});
     const segInfo = loadJSON(LS_SEGMENT_INFO, {});
-    const includeTypes = loadJSON(LS_TYPE_FILTER, null);
+    const hidden = loadHidden();
     const afterEpoch = Math.floor((Date.now() - LOOKBACK_DAYS*24*60*60*1000) / 1000);
     myAthleteId = (loadJSON(LS_ATHLETE, {}) || {}).id;
 
     const myCounts = {};
     Object.keys(activities).forEach(id => {
       const act = activities[id];
-      if(includeTypes && !includeTypes.includes(act.sport_type)) return;
+      if(!isEligibleSportType(act.sport_type)) return;
       const efforts = detailCache[id] || [];
       efforts.forEach(e => {
         const effortTime = new Date(e.startDate).getTime();
@@ -494,18 +542,25 @@
       if(amLegend) runsAway = 0;
       else if(legendCount != null) runsAway = Math.max(legendCount - myCount + 1, 0);
       else runsAway = null;
+      let distanceMi = null;
+      if(userLocation && info.startLatlng && info.startLatlng.length === 2){
+        distanceMi = haversineMiles(userLocation.lat, userLocation.lng, info.startLatlng[0], info.startLatlng[1]);
+      }
       return {
         segId, name, myCount,
         legendCount,
         legendUnavailable: !legend && !!info.error,
         runsAway,
-        amLegend
+        distanceMi,
+        amLegend,
+        hidden: hidden.has(String(segId))
       };
     });
   }
 
   function renderTable(){
-    const rows = buildRows();
+    const allRows = buildRows();
+    const rows = cbShowHidden.checked ? allRows : allRows.filter(r => !r.hidden);
     emptyMsg.style.display = rows.length ? 'none' : 'block';
 
     document.querySelectorAll('#segTable th').forEach(th => {
@@ -521,21 +576,28 @@
 
     rows.sort((a, b) => {
       let av = a[sortKey], bv = b[sortKey];
-      if(av == null) av = sortKey === 'runsAway' ? Infinity : -Infinity;
-      if(bv == null) bv = sortKey === 'runsAway' ? Infinity : -Infinity;
-      if(typeof av === 'string') return av.localeCompare(bv) * sortDir;
-      return (av - bv) * sortDir;
+      if(NUMERIC_KEYS.has(sortKey)){
+        if(av == null) av = Infinity;
+        if(bv == null) bv = Infinity;
+        return (Number(av) - Number(bv)) * sortDir;
+      }
+      return String(av || '').localeCompare(String(bv || '')) * sortDir;
     });
 
     segTableBody.innerHTML = '';
     rows.forEach(r => {
       const tr = document.createElement('tr');
+      tr.className = r.hidden ? 'row-hidden' : '';
       const laurel = r.amLegend ? '<span class="laurel" title="You are the local legend">\u{1F3C6}</span>' : '';
+      const eyeBtn = r.hidden
+        ? `<button class="icon-btn" data-action="unhide" data-seg="${r.segId}" title="Unhide segment">\u{1F441}\u{FE0F}</button>`
+        : `<button class="icon-btn" data-action="hide" data-seg="${r.segId}" title="Hide segment">\u{1F648}</button>`;
       tr.innerHTML = `
-        <td class="seg-name">${laurel}<a href="https://www.strava.com/segments/${r.segId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>
+        <td class="seg-name">${eyeBtn}${laurel}<a href="https://www.strava.com/segments/${r.segId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>
         <td class="num">${r.myCount}</td>
         <td class="num">${r.legendCount != null ? r.legendCount : (r.legendUnavailable ? 'unavailable' : '—')}</td>
         <td class="num">${r.amLegend ? 'Legend' : (r.runsAway != null ? r.runsAway : '—')}</td>
+        <td class="num">${r.distanceMi != null ? r.distanceMi.toFixed(1) : '—'}</td>
       `;
       segTableBody.appendChild(tr);
     });
@@ -546,7 +608,11 @@
   }
 
   // initial paint if already connected
-  if(loadTok()) renderTable();
+  if(loadTok()){
+    updateLastSyncedLabel();
+    requestLocation();
+    renderTable();
+  }
 })();
 </script>
 </body>

@@ -26,16 +26,30 @@
   #appRoot{ padding:16px; }
 
   /* Force a landscape layout even when the device's rotation lock is set to
-     portrait — the phone itself never rotates, we just rotate our own box. */
+     portrait — the phone itself never rotates, we just rotate our own box.
+     Turning the phone clockwise brings it right-side up. */
   @media screen and (orientation: portrait){
-    html, body{ width:100vw; height:100vh; overflow:hidden; position:fixed; top:0; left:0; }
+    html, body{
+      width:100vw; height:100vh; height:100dvh;
+      overflow:hidden; position:fixed; top:0; left:0;
+    }
     #appRoot{
       width:100vh; height:100vw;
+      width:100dvh; height:100dvw;
       transform:rotate(-90deg);
       transform-origin:top left;
       position:absolute; top:100%; left:0;
-      overflow-y:auto; overflow-x:hidden;
+      overflow-y:scroll; overflow-x:hidden;
       -webkit-overflow-scrolling:touch;
+      touch-action:pan-y;
+      /* The physical bottom edge (portrait) — where Android's on-screen nav
+         buttons sit — becomes this rotated view's LEFT edge, so it needs the
+         padding that would normally go on the opposite physical side. */
+      padding:
+        calc(16px + env(safe-area-inset-left))
+        calc(16px + env(safe-area-inset-top))
+        calc(16px + env(safe-area-inset-right))
+        calc(16px + env(safe-area-inset-bottom));
     }
   }
 

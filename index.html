@@ -206,7 +206,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.6.0";
+  const APP_VERSION = "1.7.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -343,13 +343,21 @@
 
   segTableBody.addEventListener('click', (e) => {
     const btnEl = e.target.closest('.icon-btn');
-    if(!btnEl) return;
-    const segId = btnEl.dataset.seg;
-    const hidden = loadHidden();
-    if(btnEl.dataset.action === 'hide') hidden.add(segId); else hidden.delete(segId);
-    saveHidden(hidden);
-    renderTable();
-    pushToWorker();
+    if(btnEl){
+      const segId = btnEl.dataset.seg;
+      const hidden = loadHidden();
+      if(btnEl.dataset.action === 'hide') hidden.add(segId); else hidden.delete(segId);
+      saveHidden(hidden);
+      renderTable();
+      pushToWorker();
+      return;
+    }
+    // title-attribute tooltips don't work on touch devices — tap the "—" to
+    // see why "Mi To Start" is blank for that row instead of guessing
+    const distCell = e.target.closest('.dist-cell');
+    if(distCell && distCell.dataset.reason){
+      setSyncStatus('Mi To Start blank for this row: ' + distCell.dataset.reason);
+    }
   });
 
   function requestLocation(){
@@ -726,8 +734,12 @@
       if(amLegend) runsAway = 0;
       else if(legendCount != null) runsAway = Math.max(legendCount - myCount + 1, 0);
       else runsAway = null;
-      let distanceMi = null;
-      if(userLocation && info.startLatlng && info.startLatlng.length === 2){
+      let distanceMi = null, distanceReason = null;
+      if(!userLocation){
+        distanceReason = 'no location fix yet';
+      } else if(!info.startLatlng || info.startLatlng.length !== 2){
+        distanceReason = info.error ? 'segment info fetch failed' : 'segment has no start coordinates';
+      } else {
         distanceMi = haversineMiles(userLocation.lat, userLocation.lng, info.startLatlng[0], info.startLatlng[1]);
       }
       return {
@@ -736,6 +748,7 @@
         legendUnavailable: !legend && !!info.error,
         runsAway,
         distanceMi,
+        distanceReason,
         amLegend,
         hidden: hidden.has(String(segId))
       };
@@ -781,7 +794,7 @@
         <td class="num">${r.myCount}</td>
         <td class="num">${r.legendCount != null ? r.legendCount : (r.legendUnavailable ? 'unavailable' : '—')}</td>
         <td class="num">${r.amLegend ? 'Legend' : (r.runsAway != null ? r.runsAway : '—')}</td>
-        <td class="num">${r.distanceMi != null ? r.distanceMi.toFixed(1) : '—'}</td>
+        <td class="num dist-cell" data-reason="${escapeHtml(r.distanceReason || '')}">${r.distanceMi != null ? r.distanceMi.toFixed(1) : '—'}</td>
       `;
       segTableBody.appendChild(tr);
     });

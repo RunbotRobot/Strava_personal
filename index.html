@@ -27,7 +27,9 @@
 
   /* Force a landscape layout even when the device's rotation lock is set to
      portrait — the phone itself never rotates, we just rotate our own box.
-     Turning the phone clockwise brings it right-side up. */
+     Turning the phone counter-clockwise brings it right-side up (matched to
+     the 'landscape-primary' direction used by the real orientation lock,
+     below, so both modes agree on which way to turn the phone). */
   @media screen and (orientation: portrait){
     html, body{
       width:100vw; height:100vh; height:100dvh;
@@ -36,9 +38,9 @@
     #appRoot{
       width:100vh; height:100vw;
       width:100dvh; height:100dvw;
-      transform:rotate(-90deg);
+      transform:rotate(90deg);
       transform-origin:top left;
-      position:absolute; top:100%; left:0;
+      position:absolute; top:0; left:100%;
       overflow-y:scroll; overflow-x:hidden;
       -webkit-overflow-scrolling:touch;
       /* Not pan-y: the box is rotated 90°, so the content's actual scroll
@@ -47,13 +49,14 @@
          the gesture outright rather than just misreading it. */
       touch-action:auto;
       /* The physical bottom edge (portrait) — where Android's on-screen nav
-         buttons sit — becomes this rotated view's LEFT edge, so it needs the
-         padding that would normally go on the opposite physical side. */
+         buttons sit — becomes this rotated view's RIGHT edge under this
+         rotation direction, so it needs the padding that would normally go
+         on the opposite physical side. */
       padding:
-        calc(16px + env(safe-area-inset-left))
-        calc(16px + env(safe-area-inset-top))
         calc(16px + env(safe-area-inset-right))
-        calc(16px + env(safe-area-inset-bottom));
+        calc(16px + env(safe-area-inset-bottom))
+        calc(16px + env(safe-area-inset-left))
+        calc(16px + env(safe-area-inset-top));
     }
   }
 
@@ -203,7 +206,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.3.0";
+  const APP_VERSION = "1.4.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -339,7 +342,12 @@
         console.warn('geolocation unavailable (non-fatal):', err.message);
         locationStatusEl.textContent = 'Location: unavailable (' + err.message + ') — "Mi To Start" will show "—".';
       },
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5*60*1000 }
+      // high accuracy asks for a real GPS fix rather than a coarse
+      // network/cell-tower estimate (which was giving ~2km of error —
+      // not tight enough to usefully compare nearby segments' distances);
+      // it's slower and costs more battery, worth it for a one-time
+      // per-page-load fix
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60*1000 }
     );
   }
 

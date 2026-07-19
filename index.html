@@ -138,6 +138,7 @@
     <div class="filters" id="segmentFilters">
       <label><input type="checkbox" id="cbShowHidden" /> Show hidden segments</label>
     </div>
+    <div class="small-note" id="locationStatus" style="margin:-4px 0 10px;"></div>
     <div class="table-wrap">
       <table id="segTable">
         <thead>
@@ -202,7 +203,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.2.0";
+  const APP_VERSION = "1.3.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -233,7 +234,10 @@
       }
       try{
         await document.documentElement.requestFullscreen();
-        await screen.orientation.lock('landscape');
+        // A specific direction, not the generic 'landscape' — that let the
+        // browser pick either landscape-primary or -secondary, which came
+        // out 180° opposite of the CSS fallback's rotation direction.
+        await screen.orientation.lock('landscape-primary');
       }catch(err){
         console.warn('Landscape lock unavailable, falling back to rotated view:', err.message);
       }
@@ -284,6 +288,7 @@
   const cbShowHidden = document.getElementById('cbShowHidden');
   const segTableBody = document.getElementById('segTableBody');
   const emptyMsg = document.getElementById('emptyMsg');
+  const locationStatusEl = document.getElementById('locationStatus');
 
   function setSyncStatus(msg){ syncStatusEl.textContent = msg || ''; }
 
@@ -319,10 +324,21 @@
   });
 
   function requestLocation(){
-    if(!('geolocation' in navigator)) return;
+    if(!('geolocation' in navigator)){
+      locationStatusEl.textContent = 'Location: not supported by this browser — "Mi To Start" will show "—".';
+      return;
+    }
+    locationStatusEl.textContent = 'Location: requesting…';
     navigator.geolocation.getCurrentPosition(
-      pos => { userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude }; renderTable(); },
-      err => { console.warn('geolocation unavailable (non-fatal):', err.message); },
+      pos => {
+        userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        locationStatusEl.textContent = 'Location: acquired (±' + Math.round(pos.coords.accuracy) + 'm)';
+        renderTable();
+      },
+      err => {
+        console.warn('geolocation unavailable (non-fatal):', err.message);
+        locationStatusEl.textContent = 'Location: unavailable (' + err.message + ') — "Mi To Start" will show "—".';
+      },
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 5*60*1000 }
     );
   }
@@ -368,6 +384,7 @@
       return true;
     }catch(err){
       console.warn('Could not load persisted state from worker (using local cache):', err.message);
+      setSyncStatus('⚠ Could not reach the persistence worker (' + err.message + ') — running on localStorage only for now, which RouteGuard’s cache can evict.');
       return false;
     }
   }
@@ -384,6 +401,7 @@
       if(!res.ok) throw new Error('worker responded ' + res.status);
     }catch(err){
       console.warn('Could not persist state to worker (kept locally only):', err.message);
+      setSyncStatus('⚠ Could not save to the persistence worker (' + err.message + ') — this data is only in localStorage for now, which RouteGuard’s cache can evict.');
     }
   }
 

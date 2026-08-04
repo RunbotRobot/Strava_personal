@@ -18,12 +18,12 @@
     }
   }
   *{box-sizing:border-box;}
-  html, body{ margin:0; padding:0; height:100%; }
+  html, body{ margin:0; padding:0; height:100%; overscroll-behavior-y: contain; }
   body{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     background:var(--bg); color:var(--text);
   }
-  #appRoot{ padding:16px; }
+  #appRoot{ padding:16px; overscroll-behavior-y: contain; }
 
   /* Force a landscape layout even when the device's rotation lock is set to
      portrait — the phone itself never rotates, we just rotate our own box.
@@ -206,7 +206,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.9.0";
+  const APP_VERSION = "1.9.1";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;

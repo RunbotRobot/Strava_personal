@@ -206,7 +206,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.9.1";
+  const APP_VERSION = "1.10.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -666,6 +666,26 @@
   // ---------- rate-limit-aware API helper ----------
   async function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
+  // Runs `worker` over `items` with at most `limit` in flight at once,
+  // instead of one request at a time — Strava's real limit (200/15min) is
+  // generous relative to a personal sync, so a small concurrent batch cuts
+  // wall-clock sync time roughly by the concurrency factor without coming
+  // close to that limit. apiGet's own 429 handling still applies per-request
+  // if a burst ever does trip it.
+  async function runWithConcurrency(items, limit, worker){
+    let nextIndex = 0, completed = 0;
+    async function runNext(){
+      while(nextIndex < items.length){
+        const i = nextIndex++;
+        await worker(items[i], i);
+        completed++;
+      }
+    }
+    const lanes = Array.from({ length: Math.min(limit, items.length) }, runNext);
+    await Promise.all(lanes);
+    return completed;
+  }
+
   async function apiGet(path, params){
     const accessToken = await ensureToken();
     if(!accessToken) throw new Error('not connected');
@@ -731,9 +751,8 @@
       // 2. fetch activity detail (segment_efforts) for any activity not yet cached
       const detailCache = loadJSON(LS_ACTIVITY_DETAIL, {});
       const missing = allIds.filter(id => !detailCache[id]);
-      for(let i=0; i<missing.length; i++){
-        const id = missing[i];
-        setSyncStatus(`Fetching activity detail ${i+1}/${missing.length}...`);
+      let detailDone = 0;
+      await runWithConcurrency(missing, 8, async (id) => {
         const detail = await apiGet(`/activities/${id}`);
         detailCache[id] = (detail.segment_efforts || []).map(e => ({
           segmentId: e.segment.id,
@@ -741,8 +760,9 @@
           startDate: e.start_date
         }));
         saveJSON(LS_ACTIVITY_DETAIL, detailCache);
-        await sleep(120);
-      }
+        detailDone++;
+        setSyncStatus(`Fetching activity detail ${detailDone}/${missing.length}...`);
+      });
 
       // 3. aggregate my effort counts per segment within the window (segIds only, for the segment-info fetch list)
       const myCounts = {}; // segmentId -> {count, name}
@@ -763,9 +783,8 @@
       // this object shape at all (backfill for "Mi To Start" and "Plan
       // route"), even if it's otherwise within the TTL
       const staleIds = segIds.filter(id => !segInfo[id] || segInfo[id].startLatlng === undefined || segInfo[id].polyline === undefined || (now - segInfo[id].fetchedAt) > SEGMENT_INFO_TTL_MS);
-      for(let i=0; i<staleIds.length; i++){
-        const id = staleIds[i];
-        setSyncStatus(`Fetching segment info ${i+1}/${staleIds.length}...`);
+      let segDone = 0;
+      await runWithConcurrency(staleIds, 8, async (id) => {
         try{
           const detail = await apiGet(`/segments/${id}`);
           segInfo[id] = {
@@ -784,8 +803,9 @@
           segInfo[id] = segInfo[id] || { name: myCounts[id].name, legend: null, fetchedAt: now, error: true };
         }
         saveJSON(LS_SEGMENT_INFO, segInfo);
-        await sleep(120);
-      }
+        segDone++;
+        setSyncStatus(`Fetching segment info ${segDone}/${staleIds.length}...`);
+      });
 
       saveJSON(LS_LAST_SYNC, now);
       updateLastSyncedLabel();

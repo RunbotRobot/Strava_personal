@@ -4,6 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Strava Personal</title>
+<link rel="icon" type="image/png" href="icon-512.png" />
+<link rel="apple-touch-icon" href="icon-180.png" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2f5d50" />
 <style>
   :root{
     --bg:#f4f5f2; --panel:#ffffff; --text:#1d2420; --muted:#5c6b62;
@@ -206,7 +210,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.10.0";
+  const APP_VERSION = "1.11.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;

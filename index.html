@@ -210,7 +210,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.12.0";
+  const APP_VERSION = "1.13.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -545,6 +545,42 @@
     }
   }
 
+  // Hands the worker what it needs to sync overnight on its own (see the
+  // worker's Cron Trigger) — a refresh token plus the client id/secret to
+  // use it with. Fire-and-forget: called after every successful connect or
+  // token refresh so the worker's copy never goes stale, but never blocks
+  // the UI and fails silently (console-only) since overnight sync is a
+  // bonus, not something a failure here should interrupt.
+  async function pushCredentialsToWorker(){
+    const cfg = loadCfg();
+    const tok = loadTok();
+    if(!cfg.proxy || !cfg.syncSecret || !cfg.clientId || !cfg.clientSecret || !tok || !tok.refresh_token) return;
+    try{
+      const res = await fetch(cfg.proxy + '/strava-credentials', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.syncSecret },
+        body: JSON.stringify({ clientId: cfg.clientId, clientSecret: cfg.clientSecret, refreshToken: tok.refresh_token })
+      });
+      if(!res.ok) throw new Error('worker responded ' + res.status);
+    }catch(err){
+      console.warn('Could not push credentials for overnight sync (non-fatal):', err.message);
+    }
+  }
+
+  async function deleteCredentialsFromWorker(){
+    const cfg = loadCfg();
+    if(!cfg.proxy || !cfg.syncSecret) return;
+    try{
+      const res = await fetch(cfg.proxy + '/strava-credentials', {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + cfg.syncSecret }
+      });
+      if(!res.ok) throw new Error('worker responded ' + res.status);
+    }catch(err){
+      console.warn('Could not clear overnight-sync credentials from worker (non-fatal):', err.message);
+    }
+  }
+
   // ---------- OAuth ----------
   (function initFields(){
     const cfg = loadCfg();
@@ -583,6 +619,7 @@
     cfg.syncSecret = stravaSyncSecret.value.trim();
     saveCfg(cfg);
     setSyncStatus('Worker sync secret saved.');
+    pushCredentialsToWorker(); // activates overnight sync immediately if already connected, rather than waiting for the next natural token refresh
   };
 
   function refreshStatusUI(){
@@ -624,6 +661,7 @@
 
   btnStravaDisconnect.onclick = () => {
     clearTok();
+    deleteCredentialsFromWorker(); // clearing the LOCAL token alone would leave the worker still syncing overnight on its own copy
     refreshStatusUI();
     setSyncStatus('Disconnected.');
   };
@@ -641,6 +679,7 @@
       if(!res.ok || !data.access_token) throw new Error(data.message || 'token exchange failed');
       saveTok({ access_token: data.access_token, refresh_token: data.refresh_token, expires_at: data.expires_at });
       if(data.athlete) saveJSON(LS_ATHLETE, { id: data.athlete.id, firstname: data.athlete.firstname, lastname: data.athlete.lastname });
+      pushCredentialsToWorker();
       refreshStatusUI();
       setSyncStatus('Connected. Click "Sync last 90 days" to load your segments.');
     }catch(err){
@@ -662,6 +701,7 @@
       const data = await res.json();
       if(!res.ok || !data.access_token) throw new Error('refresh failed');
       saveTok({ access_token: data.access_token, refresh_token: data.refresh_token, expires_at: data.expires_at });
+      pushCredentialsToWorker();
       return data.access_token;
     }catch(err){
       setSyncStatus('Session expired — please reconnect.');

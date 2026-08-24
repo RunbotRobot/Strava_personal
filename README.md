@@ -74,6 +74,24 @@ window where it's live but unprotected.
 Long-term, once custom domains are in the picture, each app would get fully separate localStorage anyway —
 this worker step is the practical fix for right now.
 
+## Overnight background sync
+
+Once worker persistence (above) is on, the worker also syncs on its own overnight — every 15 minutes,
+roughly 1–6am Pacific — so a large segment library finishes catching up without needing this app's tab open
+and idle all night. It reuses the same connection: as soon as you're connected with a **Worker sync secret**
+set, this app hands the worker a refresh token (and the client id/secret to use it with) via a write-only
+`/strava-credentials` endpoint, and keeps that current on every reconnect or token refresh.
+
+The worker's own sync mirrors this app's: same 90-day lookback, same segment-info caching. It self-limits to
+40 Strava API calls per run to stay under both Cloudflare's per-invocation subrequest cap and Strava's
+15-minute rate limit — if a run hits that budget (a very large backlog) or gets rate-limited, it just stops
+and picks up again at the next 15-minute firing, already in a fresh window. Results land in the same
+`/strava-state` blob this app already reads on load, so there's nothing else to configure — open the app in
+the morning and it pulls in whatever the worker synced overnight.
+
+Turning off the sync secret (clearing the field) stops future pushes, but doesn't retroactively revoke
+credentials already sent to the worker — disconnecting from Strava entirely is the way to fully stop it.
+
 ## Notes / known limitations
 
 - Strava's public API docs don't officially document the `local_legend` field on segment details, even

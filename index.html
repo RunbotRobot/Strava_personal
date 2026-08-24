@@ -210,7 +210,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.11.0";
+  const APP_VERSION = "1.12.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -288,9 +288,28 @@
   const LS_LAST_SYNC = "sp_last_sync";
   const LS_HIDDEN_SEGMENTS = "sp_hidden_segments"; // array of segment id strings
 
-  const SEGMENT_INFO_TTL_MS = 6 * 60 * 60 * 1000; // 6h — legend status can change as others run
+  const SEGMENT_INFO_TTL_MS = 6 * 60 * 60 * 1000; // 6h base — legend status can change as others run
+  const SEGMENT_INFO_TTL_JITTER_MS = 2 * 60 * 60 * 1000; // up to +2h, deterministic per segment
   const EXCLUDED_SPORT_TYPES = new Set(['Velomobile']); // car-recorded routes, not real efforts
   const NUMERIC_KEYS = new Set(['myCount', 'legendCount', 'runsAway', 'distanceMi']);
+
+  // A large batch of segments first fetched together (e.g. an initial
+  // backfill) would otherwise all expire at once, turning every later sync
+  // into a mass-refetch that can blow through Strava's 15-minute request
+  // budget in one go. Deterministic per-id jitter spreads that back out.
+  function segmentTtlFor(id){
+    let h = 0;
+    for(const c of String(id)) h = (h * 31 + c.charCodeAt(0)) | 0;
+    // avalanche mix (MurmurHash3 finalizer) — a bare polynomial hash
+    // clusters badly for short numeric strings like segment ids, giving
+    // almost no real jitter spread without this
+    h ^= h >>> 16;
+    h = Math.imul(h, 0x85ebca6b);
+    h ^= h >>> 13;
+    h = Math.imul(h, 0xc2b2ae35);
+    h ^= h >>> 16;
+    return SEGMENT_INFO_TTL_MS + ((h >>> 0) % SEGMENT_INFO_TTL_JITTER_MS);
+  }
 
   function loadJSON(key, fallback){ try{ const v = JSON.parse(localStorage.getItem(key)); return v==null?fallback:v; }catch(e){ return fallback; } }
   function saveJSON(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
@@ -690,17 +709,38 @@
     return completed;
   }
 
+  // Strava's real limit is 100 (non-upload) requests per 15 minutes, and it
+  // resets on fixed clock boundaries (:00/:15/:30/:45) — not "N minutes from
+  // when you got limited". It also doesn't send a Retry-After header at all
+  // (confirmed against Strava's own rate-limit docs), so guessing a fixed
+  // short wait was never going to line up; a 150+-segment library can
+  // exceed the window's budget in a single sync regardless. Shared across
+  // concurrent requests so they all pause together instead of each
+  // independently re-triggering 429s.
+  let rateLimitedUntil = 0;
+  function msUntilNextRateLimitWindow(){
+    const windowMs = 15 * 60 * 1000;
+    const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
+    return (windowStart + windowMs - Date.now()) + 5000; // +5s buffer for clock skew
+  }
+
   async function apiGet(path, params){
     const accessToken = await ensureToken();
     if(!accessToken) throw new Error('not connected');
     const url = new URL('https://www.strava.com/api/v3' + path);
     if(params) Object.entries(params).forEach(([k,v]) => { if(v!=null) url.searchParams.set(k, v); });
-    for(let attempt=0; attempt<4; attempt++){
+    for(let attempt=0; attempt<8; attempt++){
+      if(Date.now() < rateLimitedUntil){
+        const waitMs = rateLimitedUntil - Date.now();
+        setSyncStatus(`Rate limited by Strava — waiting for the 15-minute window to reset (~${Math.ceil(waitMs/1000)}s)...`);
+        await sleep(waitMs);
+      }
       const res = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
       if(res.status === 429){
-        const retryAfter = parseInt(res.headers.get('Retry-After') || '30', 10);
-        setSyncStatus(`Rate limited by Strava — waiting ${retryAfter}s...`);
-        await sleep(retryAfter * 1000);
+        const waitMs = msUntilNextRateLimitWindow();
+        rateLimitedUntil = Math.max(rateLimitedUntil, Date.now() + waitMs);
+        setSyncStatus(`Rate limited by Strava — waiting for the 15-minute window to reset (~${Math.ceil(waitMs/1000)}s)...`);
+        await sleep(waitMs);
         continue;
       }
       if(!res.ok) throw new Error(`Strava API ${path} failed (${res.status})`);
@@ -786,7 +826,7 @@
       // also refetch anything cached before startLatlng/polyline existed on
       // this object shape at all (backfill for "Mi To Start" and "Plan
       // route"), even if it's otherwise within the TTL
-      const staleIds = segIds.filter(id => !segInfo[id] || segInfo[id].startLatlng === undefined || segInfo[id].polyline === undefined || (now - segInfo[id].fetchedAt) > SEGMENT_INFO_TTL_MS);
+      const staleIds = segIds.filter(id => !segInfo[id] || segInfo[id].startLatlng === undefined || segInfo[id].polyline === undefined || (now - segInfo[id].fetchedAt) > segmentTtlFor(id));
       let segDone = 0;
       await runWithConcurrency(staleIds, 8, async (id) => {
         try{

@@ -210,7 +210,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.13.1";
+  const APP_VERSION = "1.14.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -311,8 +311,30 @@
     return SEGMENT_INFO_TTL_MS + ((h >>> 0) % SEGMENT_INFO_TTL_JITTER_MS);
   }
 
-  function loadJSON(key, fallback){ try{ const v = JSON.parse(localStorage.getItem(key)); return v==null?fallback:v; }catch(e){ return fallback; } }
-  function saveJSON(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
+  // In-memory fallback for when localStorage.setItem throws (quota
+  // exceeded) — RouteGuard's own map cache shares this origin's quota and
+  // can fill the entire thing, not just its own keys. Rather than let a
+  // failed local write abort the whole sync (previous behavior), keep
+  // going from memory for the rest of this page session: reads still see
+  // the freshly-synced data (so rendering and pushToWorker() both stay
+  // correct — the worker becomes the durable copy), it just won't survive
+  // a reload unless it reaches the worker first. Checked before touching
+  // localStorage at all, so once a key is falling back, it stays fast.
+  const memoryFallback = {};
+  let localStorageQuotaHit = false;
+  function loadJSON(key, fallback){
+    if(Object.prototype.hasOwnProperty.call(memoryFallback, key)) return memoryFallback[key];
+    try{ const v = JSON.parse(localStorage.getItem(key)); return v==null?fallback:v; }catch(e){ return fallback; }
+  }
+  function saveJSON(key, val){
+    memoryFallback[key] = val;
+    try{
+      localStorage.setItem(key, JSON.stringify(val));
+    }catch(err){
+      localStorageQuotaHit = true;
+      console.warn('localStorage full for "' + key + '" — keeping it in memory for this session instead:', err.message);
+    }
+  }
 
   function loadCfg(){ return loadJSON(LS_CFG, {}); }
   function saveCfg(c){ saveJSON(LS_CFG, c); }
@@ -797,7 +819,10 @@
 
   // ---------- sync ----------
   btnClearCache.onclick = () => {
-    [LS_ACTIVITIES, LS_ACTIVITY_DETAIL, LS_SEGMENT_INFO, LS_LAST_SYNC].forEach(k => localStorage.removeItem(k));
+    [LS_ACTIVITIES, LS_ACTIVITY_DETAIL, LS_SEGMENT_INFO, LS_LAST_SYNC].forEach(k => {
+      localStorage.removeItem(k);
+      delete memoryFallback[k]; // otherwise a key that fell back to memory (quota full) would survive the "clear"
+    });
     setSyncStatus('Cache cleared.');
     updateLastSyncedLabel();
     renderTable();
@@ -810,6 +835,7 @@
 
   async function runSync(){
     btnSync.disabled = true;
+    localStorageQuotaHit = false;
     try{
       const afterEpoch = Math.floor((Date.now() - LOOKBACK_DAYS*24*60*60*1000) / 1000);
       const activities = loadJSON(LS_ACTIVITIES, {});
@@ -899,7 +925,8 @@
 
       saveJSON(LS_LAST_SYNC, now);
       updateLastSyncedLabel();
-      setSyncStatus('Synced ' + new Date(now).toLocaleString() + '.');
+      setSyncStatus('Synced ' + new Date(now).toLocaleString() + '.' +
+        (localStorageQuotaHit ? ' ⚠ localStorage is full (likely RouteGuard\'s map cache) — this device\'s local copy is memory-only until it reaches the worker.' : ''));
       renderTable();
       await pushToWorker();
     } finally {

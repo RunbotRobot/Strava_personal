@@ -210,7 +210,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.13.0";
+  const APP_VERSION = "1.13.1";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -632,6 +632,12 @@
     syncPanel.style.display = connected ? 'block' : 'none';
     tablePanel.style.display = connected ? 'block' : 'none';
     if(connected){
+      // Also on every load, not just connect/refresh/field-change: anyone
+      // who set up the sync secret before overnight sync existed would
+      // otherwise never push credentials until their access token happened
+      // to expire naturally (~6h) — meaning the worker silently never got
+      // what it needed, indistinguishable from the cron itself not running.
+      pushCredentialsToWorker();
       pullFromWorker().finally(() => {
         updateLastSyncedLabel();
         requestLocation();

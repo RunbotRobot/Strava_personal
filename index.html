@@ -113,6 +113,7 @@
   .icon-btn{
     background:none; border:none; padding:0; margin-right:4px; font-size:13px;
     cursor:pointer; line-height:1; vertical-align:middle;
+    text-decoration:none; color:inherit; display:inline-block;
   }
   tr.row-hidden{opacity:.45;}
   .table-wrap{overflow-x:auto;}
@@ -210,7 +211,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.14.0";
+  const APP_VERSION = "1.15.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -399,10 +400,9 @@
         pushToWorker();
         return;
       }
-      if(action === 'plan-route'){
-        openSegmentInRouteGuard(segId, btnEl.dataset.name || '');
-        return;
-      }
+      // the route-planning icon is a plain <a target="_blank"> now (or a
+      // disabled <span> when not configured) — no JS needed, the browser
+      // handles opening it natively, which is the whole point of the change
       return;
     }
     // title-attribute tooltips don't work on touch devices — tap the "—" to
@@ -476,41 +476,36 @@
       `<trk><name>${escapeXml(name)}</name><trkseg>${trkpts}</trkseg></trk></gpx>`;
   }
 
-  // Publishes (or reuses an already-published) GPX for a segment on the same
-  // worker used for the OAuth relay/persistence, and returns its public URL.
-  async function ensureSegmentGpxUrl(segId){
+  // Publishes a segment's GPX to the worker so RouteGuard's ?segmentUrl=
+  // import can fetch it. Called proactively during sync — NOT on click — so
+  // the "Plan route" link can be a plain, precomputed <a target="_blank">,
+  // the same way the Strava segment link already opens reliably in a new
+  // tab. Doing this async work on click instead (the original design) put a
+  // network round trip between the tap and opening the tab, which mobile
+  // browsers — installed PWAs especially — are strict about still counting
+  // as a direct user gesture, so the new tab would sometimes silently not
+  // open at all. Silently no-ops if worker persistence isn't configured.
+  async function publishSegmentGpx(segId, info){
     const cfg = loadCfg();
-    if(!cfg.proxy) throw new Error('Set a token relay URL first.');
-    if(!cfg.syncSecret) throw new Error('Set a worker sync secret first (Strava Connection panel) to publish routes.');
-    const segInfo = loadJSON(LS_SEGMENT_INFO, {});
-    const info = segInfo[segId];
-    if(!info || !info.polyline) throw new Error('Strava has no route shape cached for this segment yet — try syncing again.');
+    if(!cfg.proxy || !cfg.syncSecret) return;
+    if(!info || !info.polyline) return;
     const points = decodePolyline(info.polyline);
-    if(points.length < 2) throw new Error('Segment route shape is too short to plan from.');
+    if(points.length < 2) return;
     const gpx = buildGpx(info.name || ('Segment ' + segId), points);
     const res = await fetch(cfg.proxy + '/segment-gpx/' + segId, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/gpx+xml', Authorization: 'Bearer ' + cfg.syncSecret },
       body: gpx
     });
-    if(!res.ok) throw new Error('Could not publish GPX (worker responded ' + res.status + ')');
-    return cfg.proxy + '/segment-gpx/' + segId;
+    if(!res.ok) throw new Error('worker responded ' + res.status);
   }
 
-  // Opens a new tab immediately (still within the click gesture, so it
-  // isn't popup-blocked), then fills it in once the async publish finishes.
-  async function openSegmentInRouteGuard(segId, segName){
-    const newTab = window.open('', '_blank');
-    if(newTab) newTab.document.write('Preparing route for ' + escapeHtml(segName) + '…');
-    try{
-      const gpxUrl = await ensureSegmentGpxUrl(segId);
-      const dest = ROUTEGUARD_URL + '?segmentUrl=' + encodeURIComponent(gpxUrl);
-      if(newTab) newTab.location.href = dest;
-      else window.open(dest, '_blank');
-    }catch(err){
-      if(newTab) newTab.document.write('Could not prepare this route: ' + escapeHtml(err.message));
-      setSyncStatus('Could not prepare route for "' + segName + '": ' + err.message);
-    }
+  // The GPX URL is deterministic (no server round trip needed to know it),
+  // so this can be computed synchronously at render time for a real <a href>.
+  function routeGuardUrlFor(segId){
+    const cfg = loadCfg();
+    if(!cfg.proxy || !cfg.syncSecret) return null;
+    return ROUTEGUARD_URL + '?segmentUrl=' + encodeURIComponent(cfg.proxy + '/segment-gpx/' + segId);
   }
 
   // ---------- worker-backed persistence (optional — inert unless a sync secret is set) ----------
@@ -919,6 +914,11 @@
           segInfo[id] = segInfo[id] || { name: myCounts[id].name, legend: null, fetchedAt: now, error: true };
         }
         saveJSON(LS_SEGMENT_INFO, segInfo);
+        try{
+          await publishSegmentGpx(id, segInfo[id]);
+        }catch(err){
+          console.warn('Could not publish GPX for segment', id, '(non-fatal, "Plan route" link will 404 until this succeeds):', err.message);
+        }
         segDone++;
         setSyncStatus(`Fetching segment info ${segDone}/${staleIds.length}...`);
       });
@@ -1026,7 +1026,10 @@
       const eyeBtn = r.hidden
         ? `<button class="icon-btn" data-action="unhide" data-seg="${r.segId}" title="Unhide segment">\u{1F441}\u{FE0F}</button>`
         : `<button class="icon-btn" data-action="hide" data-seg="${r.segId}" title="Hide segment">\u{1F648}</button>`;
-      const routeBtn = `<button class="icon-btn" data-action="plan-route" data-seg="${r.segId}" data-name="${escapeHtml(r.name)}" title="Plan a route to this segment in RouteGuard">\u{1F9ED}</button>`;
+      const routeGuardUrl = routeGuardUrlFor(r.segId);
+      const routeBtn = routeGuardUrl
+        ? `<a class="icon-btn" href="${escapeHtml(routeGuardUrl)}" target="_blank" rel="noopener" title="Plan a route to this segment in RouteGuard">\u{1F9ED}</a>`
+        : `<span class="icon-btn" style="cursor:default;opacity:.35;" title="Set a worker sync secret (Strava Connection panel) to enable this">\u{1F9ED}</span>`;
       tr.innerHTML = `
         <td class="seg-name">${eyeBtn}${routeBtn}${laurel}<a href="https://www.strava.com/segments/${r.segId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>
         <td class="num">${r.myCount}</td>

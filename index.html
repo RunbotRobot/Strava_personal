@@ -85,6 +85,11 @@
   }
   button.primary{background:var(--accent); color:#fff; border-color:var(--accent);}
   button.danger-text{color:var(--danger); border-color:var(--danger);}
+  .landscape-note{
+    background:var(--gold); color:#1d2420; font-weight:700; font-size:13px;
+    padding:10px 14px; border-radius:8px; margin-bottom:14px; text-align:center;
+    border:2px solid var(--accent-2);
+  }
   button:disabled{opacity:.5; cursor:default;}
   .status-pill{
     font-size:12px; padding:5px 9px; border-radius:20px; display:inline-block;
@@ -130,6 +135,7 @@
   <h1>Strava Personal<span class="version-badge" id="appVersion"></span></h1>
   <p class="subtitle">Local Legend tracker — segments run in the last <span id="lookbackDaysLabel">90</span> days</p>
   <button id="btnLockLandscape" style="display:none; margin-bottom:12px;">⤢ Lock landscape</button>
+  <div id="landscapeScrollNote" class="landscape-note" style="display:none;">⚠️ Scrolling won't work until you tap "Lock landscape" above</div>
 
   <div class="panel" id="syncPanel" style="display:none;">
     <h2>Sync</h2>
@@ -215,7 +221,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.16.0";
+  const APP_VERSION = "1.17.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -229,13 +235,21 @@
   // handling both just work, instead of being faked with a transform.
   (function initLandscapeLockButton(){
     const btn = document.getElementById('btnLockLandscape');
+    const scrollNote = document.getElementById('landscapeScrollNote');
     const supported = !!(screen.orientation && screen.orientation.lock && document.documentElement.requestFullscreen);
     if(!supported) return; // leave hidden — CSS fallback handles this browser instead
     btn.style.display = 'inline-block';
 
     function updateLabel(){
-      btn.textContent = document.fullscreenElement ? '⤢ Exit landscape' : '⤢ Lock landscape';
+      const locked = !!document.fullscreenElement;
+      btn.textContent = locked ? '⤢ Exit landscape' : '⤢ Lock landscape';
+      // The CSS rotate fallback's scrolling never got fully reliable on
+      // real devices (see the touch-action fix — it helped, but didn't
+      // fully solve it), so make it obvious there's a one-tap fix instead
+      // of leaving people to discover a "broken" scroll on their own.
+      scrollNote.style.display = locked ? 'none' : 'block';
     }
+    updateLabel(); // covers reloading while already locked (e.g. a persisted PWA fullscreen state)
     document.addEventListener('fullscreenchange', updateLabel);
 
     async function tryLock(){
@@ -1030,7 +1044,12 @@
       const legend = info.legend || null;
       const myCount = myCounts[segId].count;
       const name = info.name || myCounts[segId].name;
-      const amLegend = !!(legend && myAthleteId && legend.athleteId === myAthleteId);
+      // String-compared, not ===: Strava's local_legend.effort_count needs an
+      // explicit Number() cast a few lines up (loosely typed in that object),
+      // and athlete_id is exactly as likely to come back the same way — a
+      // strict === here would silently never match, always falling through
+      // to "1 more run needed" even when you're the actual legend.
+      const amLegend = !!(legend && myAthleteId != null && String(legend.athleteId) === String(myAthleteId));
       const legendCount = legend ? legend.effortCount : null;
       let runsAway;
       if(amLegend) runsAway = 0;

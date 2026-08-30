@@ -110,7 +110,14 @@
   }
   th:hover{color:var(--text);}
   th .arrow{display:block; font-size:9px; text-align:center; margin-bottom:1px;}
-  th.num, td.num{width:44px; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;}
+  th.num, td.num{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;}
+  /* per-column widths, sized to each header's actual (non-wrapping) content
+     instead of one shared guess — "Mi To Start" needs real room, "Mine"
+     doesn't, and the difference was overflowing the table horizontally */
+  #segTable th:nth-child(2), #segTable td:nth-child(2){width:32px;}
+  #segTable th:nth-child(3), #segTable td:nth-child(3){width:44px;}
+  #segTable th:nth-child(4), #segTable td:nth-child(4){width:48px;}
+  #segTable th:nth-child(5), #segTable td:nth-child(5){width:68px;}
   td.seg-name{white-space:normal; word-break:break-word;}
   td.seg-name a{color:var(--text); text-decoration:none; border-bottom:1px solid var(--border);}
   td.seg-name a:hover{border-color:var(--text);}
@@ -221,7 +228,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.17.1";
+  const APP_VERSION = "1.17.2";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;

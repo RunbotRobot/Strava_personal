@@ -228,7 +228,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.17.2";
+  const APP_VERSION = "1.17.3";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -476,10 +476,11 @@
   }
 
   // ---------- hand a segment off to RouteGuard ----------
-  const ROUTEGUARD_URL = 'https://runbotrobot.github.io/routeguard/';
   // Baked in so a visitor with no setup of their own can still see the
   // owner's public read-only view (below) and use "Plan route" — both only
   // ever GET from this worker, no credentials involved either way.
+  // (RouteGuard's own URL now lives server-side, in the worker's
+  // /open-routeguard/{id} redirect — see routeGuardUrlFor below.)
   const PUBLIC_WORKER_URL = 'https://sweet-bar-0621.runbotrobot.workers.dev';
 
   // Google/Strava's standard encoded-polyline algorithm.
@@ -538,11 +539,18 @@
   // No syncSecret needed here even for the owner — reading a published GPX
   // is a public GET, only publishing (above) is auth-gated — so this works
   // for a public visitor too, falling back to the known worker URL.
+  // Routed through the worker's own /open-routeguard/{id} redirect instead
+  // of linking straight to RouteGuard — Chrome on Android treats a
+  // target="_blank" click as staying inside the CURRENT installed PWA's own
+  // window whenever the destination is same-origin with it (by design), and
+  // RouteGuard and this app are both hosted under runbotrobot.github.io.
+  // Hopping through the worker's different origin first makes Chrome treat
+  // it as an off-origin navigation, opening a separate window/task instead.
   function routeGuardUrlFor(segId){
     const cfg = loadCfg();
     const proxy = cfg.proxy || PUBLIC_WORKER_URL;
     if(!proxy) return null;
-    return ROUTEGUARD_URL + '?segmentUrl=' + encodeURIComponent(proxy + '/segment-gpx/' + segId);
+    return proxy + '/open-routeguard/' + segId;
   }
 
   // ---------- worker-backed persistence (optional — inert unless a sync secret is set) ----------

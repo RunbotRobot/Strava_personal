@@ -221,7 +221,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.17.0";
+  const APP_VERSION = "1.17.1";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -728,7 +728,17 @@
       // to expire naturally (~6h) — meaning the worker silently never got
       // what it needed, indistinguishable from the cron itself not running.
       pushCredentialsToWorker();
-      pullFromWorker().finally(() => {
+      pullFromWorker().then((pulled) => {
+        // Right after a successful pull, local state === the worker's own
+        // state (applyPersistedState just wrote it), so echoing it straight
+        // back is safe — it can't clobber anything fresher. This is what
+        // self-heals fields added after some data was already stored (like
+        // athleteId, needed for the public view's legend check) without
+        // requiring an explicit sync to backfill them. Skipped when the
+        // pull itself failed — local state could be genuinely stale then,
+        // and pushing it would risk overwriting the worker's newer copy.
+        if(pulled) pushToWorker();
+      }).finally(() => {
         updateLastSyncedLabel();
         requestLocation();
         renderTable();

@@ -228,7 +228,7 @@
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.17.3";
+  const APP_VERSION = "1.17.4";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -539,18 +539,28 @@
   // No syncSecret needed here even for the owner — reading a published GPX
   // is a public GET, only publishing (above) is auth-gated — so this works
   // for a public visitor too, falling back to the known worker URL.
-  // Routed through the worker's own /open-routeguard/{id} redirect instead
-  // of linking straight to RouteGuard — Chrome on Android treats a
-  // target="_blank" click as staying inside the CURRENT installed PWA's own
-  // window whenever the destination is same-origin with it (by design), and
-  // RouteGuard and this app are both hosted under runbotrobot.github.io.
-  // Hopping through the worker's different origin first makes Chrome treat
-  // it as an off-origin navigation, opening a separate window/task instead.
   function routeGuardUrlFor(segId){
     const cfg = loadCfg();
     const proxy = cfg.proxy || PUBLIC_WORKER_URL;
     if(!proxy) return null;
-    return proxy + '/open-routeguard/' + segId;
+    const dest = 'https://runbotrobot.github.io/routeguard/?segmentUrl=' + encodeURIComponent(proxy + '/segment-gpx/' + segId);
+    // Chrome on Android keeps a target="_blank" click inside the CURRENT
+    // installed/home-screen app's own window for a same-origin destination
+    // — confirmed this isn't decided by the INITIAL link's origin (routing
+    // through the worker's different origin first, as an earlier attempt,
+    // made no difference), so Chrome must be evaluating the final resolved
+    // destination. An intent:// URL instead routes the click through
+    // Android's own Intent resolution — the same mechanism used when a link
+    // is tapped from any other app — which isn't part of that same-window
+    // logic at all. Only used on the platform already confirmed to support
+    // screen.orientation.lock (Android Chrome, same check used for the
+    // landscape-lock feature) — other browsers don't recognize intent://
+    // and would just fail to navigate, so they get the plain link.
+    if(screen.orientation && screen.orientation.lock){
+      const u = new URL(dest);
+      return `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;end`;
+    }
+    return dest;
   }
 
   // ---------- worker-backed persistence (optional — inert unless a sync secret is set) ----------

@@ -92,6 +92,26 @@ the morning and it pulls in whatever the worker synced overnight.
 Turning off the sync secret (clearing the field) stops future pushes, but doesn't retroactively revoke
 credentials already sent to the worker — disconnecting from Strava entirely is the way to fully stop it.
 
+## Public read-only view
+
+Anyone who opens this page without connecting their own Strava account sees a read-only copy of the owner's
+data instead of a "please connect" prompt — no Strava app, no worker sync secret, nothing to set up. It's
+fetched from the worker's `GET /strava-state-public` endpoint (no auth — that's the point) and rendered
+entirely in memory, so a visitor's own device never ends up holding a stored copy of someone else's data.
+
+**Hidden segments — and the fact that they're hidden at all — never reach this endpoint.** They're filtered
+out server-side, in the worker, not just hidden in this app's UI, so there's nothing to find even by
+inspecting the response directly. A visitor also can't hide/unhide anything themselves (that control simply
+isn't shown to them) and doesn't get "Show hidden segments" at all.
+
+The Strava Connection panel (Client ID/Secret, the sync secret, Connect/Disconnect) is tucked behind a small
+"Owner? Connect here" link rather than shown by default — that's for declutter, not security; the real
+boundary is the worker's own auth on every write. Reconnecting from a browser that's never connected before
+still works exactly the same, it's just one tap away instead of already on screen.
+
+"Plan route" still works for a visitor too — it only ever reads an already-published, public GPX file, no
+credentials involved.
+
 ## Notes / known limitations
 
 - Strava's public API docs don't officially document the `local_legend` field on segment details, even

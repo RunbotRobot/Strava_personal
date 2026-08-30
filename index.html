@@ -164,7 +164,7 @@
     </div>
   </div>
 
-  <div class="panel" id="connectPanel">
+  <div class="panel" id="connectPanel" style="display:none;">
     <h2>Strava Connection</h2>
     <div id="stravaStatus" class="status-pill disconnected">Not connected</div>
     <div id="stravaFields" style="margin-top:10px;">
@@ -206,12 +206,16 @@
     </div>
   </div>
 
+  <div style="text-align:center; margin-top:-6px;">
+    <button id="btnRevealConnect" style="font-size:11px; opacity:.5; background:none; border:none; text-decoration:underline; cursor:pointer; padding:4px;">Owner? Connect here</button>
+  </div>
+
 </div>
 <script>
 (function(){
   "use strict";
 
-  const APP_VERSION = "1.15.0";
+  const APP_VERSION = "1.16.0";
   document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
   const LOOKBACK_DAYS = 90;
@@ -356,6 +360,9 @@
   const btnStravaDisconnect = document.getElementById('btnStravaDisconnect');
   const syncPanel = document.getElementById('syncPanel');
   const tablePanel = document.getElementById('tablePanel');
+  const connectPanel = document.getElementById('connectPanel');
+  const btnRevealConnect = document.getElementById('btnRevealConnect');
+  const segmentFilters = document.getElementById('segmentFilters');
   const btnSync = document.getElementById('btnSync');
   const btnClearCache = document.getElementById('btnClearCache');
   const syncStatusEl = document.getElementById('syncStatus');
@@ -376,6 +383,7 @@
   let myAthleteId = (loadJSON(LS_ATHLETE, {}) || {}).id;
   let sortKey = 'runsAway', sortDir = 1;
   let userLocation = null; // {lat, lng}, populated by requestLocation()
+  let connectPanelRevealed = false; // must also exist before initFields() calls refreshStatusUI()
 
   document.querySelectorAll('#segTable th').forEach(th => {
     th.addEventListener('click', () => {
@@ -448,6 +456,10 @@
 
   // ---------- hand a segment off to RouteGuard ----------
   const ROUTEGUARD_URL = 'https://runbotrobot.github.io/routeguard/';
+  // Baked in so a visitor with no setup of their own can still see the
+  // owner's public read-only view (below) and use "Plan route" — both only
+  // ever GET from this worker, no credentials involved either way.
+  const PUBLIC_WORKER_URL = 'https://sweet-bar-0621.runbotrobot.workers.dev';
 
   // Google/Strava's standard encoded-polyline algorithm.
   function decodePolyline(encoded){
@@ -502,10 +514,14 @@
 
   // The GPX URL is deterministic (no server round trip needed to know it),
   // so this can be computed synchronously at render time for a real <a href>.
+  // No syncSecret needed here even for the owner — reading a published GPX
+  // is a public GET, only publishing (above) is auth-gated — so this works
+  // for a public visitor too, falling back to the known worker URL.
   function routeGuardUrlFor(segId){
     const cfg = loadCfg();
-    if(!cfg.proxy || !cfg.syncSecret) return null;
-    return ROUTEGUARD_URL + '?segmentUrl=' + encodeURIComponent(cfg.proxy + '/segment-gpx/' + segId);
+    const proxy = cfg.proxy || PUBLIC_WORKER_URL;
+    if(!proxy) return null;
+    return ROUTEGUARD_URL + '?segmentUrl=' + encodeURIComponent(proxy + '/segment-gpx/' + segId);
   }
 
   // ---------- worker-backed persistence (optional — inert unless a sync secret is set) ----------
@@ -515,7 +531,10 @@
       activityDetail: loadJSON(LS_ACTIVITY_DETAIL, {}),
       segmentInfo: loadJSON(LS_SEGMENT_INFO, {}),
       lastSync: loadJSON(LS_LAST_SYNC, null),
-      hiddenSegments: loadJSON(LS_HIDDEN_SEGMENTS, [])
+      hiddenSegments: loadJSON(LS_HIDDEN_SEGMENTS, []),
+      // needed so the public read-only view (fed from this same blob) can
+      // work out "amLegend" without its own Strava session to ask
+      athleteId: (loadJSON(LS_ATHLETE, {}) || {}).id ?? null
     };
   }
 
@@ -526,6 +545,35 @@
     saveJSON(LS_SEGMENT_INFO, state.segmentInfo || {});
     if(state.lastSync != null) saveJSON(LS_LAST_SYNC, state.lastSync);
     saveJSON(LS_HIDDEN_SEGMENTS, state.hiddenSegments || []);
+    if(state.athleteId != null){
+      saveJSON(LS_ATHLETE, { ...(loadJSON(LS_ATHLETE, {}) || {}), id: state.athleteId });
+    }
+  }
+
+  // ---------- public read-only view (no local token, no credentials) ----------
+  // Renders the owner's data for a visitor with no setup of their own.
+  // Populates the in-memory storage fallback directly (same mechanism the
+  // localStorage-quota fix already added) rather than localStorage itself —
+  // a random visitor's own device shouldn't end up holding a persistent copy
+  // of someone else's Strava data just from opening this page.
+  async function loadPublicView(){
+    try{
+      const res = await fetch(PUBLIC_WORKER_URL + '/strava-state-public');
+      if(!res.ok) throw new Error('worker responded ' + res.status);
+      const data = await res.json();
+      memoryFallback[LS_ACTIVITIES] = (data && data.activities) || {};
+      memoryFallback[LS_ACTIVITY_DETAIL] = (data && data.activityDetail) || {};
+      memoryFallback[LS_SEGMENT_INFO] = (data && data.segmentInfo) || {};
+      memoryFallback[LS_LAST_SYNC] = (data && data.lastSync) || null;
+      memoryFallback[LS_HIDDEN_SEGMENTS] = []; // already filtered server-side — nothing left to hide, and no way to discover what was
+      memoryFallback[LS_ATHLETE] = { id: data && data.athleteId };
+    }catch(err){
+      console.warn('Could not load public view:', err.message);
+      setSyncStatus('⚠ Could not load data (' + err.message + ').');
+    }
+    updateLastSyncedLabel();
+    requestLocation();
+    renderTable();
   }
 
   async function pullFromWorker(){
@@ -603,7 +651,7 @@
     const cfg = loadCfg();
     stravaClientId.value = cfg.clientId || '';
     stravaClientSecret.value = cfg.clientSecret || '';
-    stravaProxy.value = cfg.proxy || '';
+    stravaProxy.value = cfg.proxy || PUBLIC_WORKER_URL;
     stravaSyncSecret.value = cfg.syncSecret || '';
     refreshStatusUI();
   })();
@@ -639,6 +687,12 @@
     pushCredentialsToWorker(); // activates overnight sync immediately if already connected, rather than waiting for the next natural token refresh
   };
 
+  // Connecting is the OWNER's own action — anyone else just gets the public
+  // read-only view below with zero setup. The connect form stays tucked
+  // away (not hidden as security, just decluttered — the real boundary is
+  // the worker's own auth) unless the owner reveals it via btnRevealConnect.
+  // (connectPanelRevealed itself is declared earlier, alongside the other
+  // state initFields() needs before it runs.)
   function refreshStatusUI(){
     const tok = loadTok();
     const connected = !!tok;
@@ -647,7 +701,12 @@
     btnStravaConnect.style.display = connected ? 'none' : 'block';
     btnStravaDisconnect.style.display = connected ? 'block' : 'none';
     syncPanel.style.display = connected ? 'block' : 'none';
-    tablePanel.style.display = connected ? 'block' : 'none';
+    connectPanel.style.display = (connected || connectPanelRevealed) ? 'block' : 'none';
+    btnRevealConnect.style.display = (connected || connectPanelRevealed) ? 'none' : 'block';
+    // hide/unhide only makes sense for the owner — a visitor's copy is
+    // already scrubbed of hidden segments server-side, nothing left to show
+    segmentFilters.style.display = connected ? 'block' : 'none';
+    tablePanel.style.display = 'block'; // always visible now — public data if not connected, the owner's own view if connected
     if(connected){
       // Also on every load, not just connect/refresh/field-change: anyone
       // who set up the sync secret before overnight sync existed would
@@ -660,8 +719,15 @@
         requestLocation();
         renderTable();
       });
+    } else {
+      loadPublicView();
     }
   }
+
+  btnRevealConnect.onclick = () => {
+    connectPanelRevealed = true;
+    refreshStatusUI();
+  };
 
   btnStravaConnect.onclick = () => {
     const cfg = {
@@ -702,8 +768,7 @@
       if(!res.ok || !data.access_token) throw new Error(data.message || 'token exchange failed');
       saveTok({ access_token: data.access_token, refresh_token: data.refresh_token, expires_at: data.expires_at });
       if(data.athlete) saveJSON(LS_ATHLETE, { id: data.athlete.id, firstname: data.athlete.firstname, lastname: data.athlete.lastname });
-      pushCredentialsToWorker();
-      refreshStatusUI();
+      refreshStatusUI(); // pushes credentials itself now (runs on every connected load), no need to also do it here
       setSyncStatus('Connected. Click "Sync last 90 days" to load your segments.');
     }catch(err){
       setSyncStatus('Login failed: ' + err.message);
@@ -1019,11 +1084,15 @@
     });
 
     segTableBody.innerHTML = '';
+    const isOwner = !!loadTok();
     rows.forEach(r => {
       const tr = document.createElement('tr');
       tr.className = r.hidden ? 'row-hidden' : '';
       const laurel = r.amLegend ? '<span class="laurel" title="You are the local legend">\u{1F3C6}</span>' : '';
-      const eyeBtn = r.hidden
+      // hide/unhide is owner-only — a visitor's copy is already scrubbed of
+      // hidden segments server-side, so there's nothing left for them to
+      // toggle, and a fake local-only toggle would just be confusing
+      const eyeBtn = !isOwner ? '' : r.hidden
         ? `<button class="icon-btn" data-action="unhide" data-seg="${r.segId}" title="Unhide segment">\u{1F441}\u{FE0F}</button>`
         : `<button class="icon-btn" data-action="hide" data-seg="${r.segId}" title="Hide segment">\u{1F648}</button>`;
       const routeGuardUrl = routeGuardUrlFor(r.segId);
